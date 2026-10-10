@@ -4,6 +4,11 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { discoverFilesWithOptions } from "../src/discover.ts";
 
+function symlinksUnavailable(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === "EPERM" || code === "EACCES" || code === "ENOSYS" || code === "ENOTSUP" || code === "EOPNOTSUPP";
+}
+
 describe("file discovery and security boundary filtering", () => {
   it("filters out directories, special files, and files exceeding max size", () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "p-disc-filter-"));
@@ -49,7 +54,7 @@ describe("file discovery and security boundary filtering", () => {
     }
   });
 
-  it("prevents traversal from symlinks pointing outside workspace root", () => {
+  it("prevents traversal from symlinks pointing outside workspace root", (context) => {
     const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "p-disc-root-"));
     const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "p-disc-outside-"));
     try {
@@ -58,8 +63,12 @@ describe("file discovery and security boundary filtering", () => {
       const symlinkPath = path.join(tmpRoot, "symlink_escape.ts");
       try {
         fs.symlinkSync(outsideFile, symlinkPath);
-      } catch {
-        // Ignored on environments without symlink capabilities
+      } catch (error) {
+        if (symlinksUnavailable(error)) {
+          context.skip();
+          return;
+        }
+        throw error;
       }
 
       const discovered = discoverFilesWithOptions(tmpRoot, { maxFileSize: 10000 });
@@ -72,7 +81,7 @@ describe("file discovery and security boundary filtering", () => {
     }
   });
 
-  it("does not index an internal file symlink twice", () => {
+  it("does not index an internal file symlink twice", (context) => {
     const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "p-disc-internal-"));
     try {
       const targetFile = path.join(tmpRoot, "target.ts");
@@ -80,8 +89,12 @@ describe("file discovery and security boundary filtering", () => {
       const symlinkPath = path.join(tmpRoot, "link_to_target.ts");
       try {
         fs.symlinkSync(targetFile, symlinkPath);
-      } catch {
-        // Ignored on environments without symlink capabilities
+      } catch (error) {
+        if (symlinksUnavailable(error)) {
+          context.skip();
+          return;
+        }
+        throw error;
       }
 
       const discovered = discoverFilesWithOptions(tmpRoot, { maxFileSize: 10000 });
@@ -91,7 +104,7 @@ describe("file discovery and security boundary filtering", () => {
     }
   });
 
-  it("honors hidden files, built-in and user exclusions, and internal symlink rules", () => {
+  it("honors hidden files, built-in and user exclusions", () => {
     const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "p-disc-glob-contract-"));
     try {
       const hiddenDirectory = path.join(tmpRoot, ".hidden");
@@ -111,31 +124,38 @@ describe("file discovery and security boundary filtering", () => {
       fs.writeFileSync(lastSource, "export const last = true;\n");
       fs.writeFileSync(firstSource, "export const first = true;\n");
 
-      const fileSymlink = path.join(tmpRoot, "linked.ts");
-      const directorySymlink = path.join(tmpRoot, "linked-hidden");
-      let hasFileSymlink = false;
-      let hasDirectorySymlink = false;
-      try {
-        fs.symlinkSync(hiddenSource, fileSymlink);
-        hasFileSymlink = true;
-      } catch {
-        // Symlinks may be unavailable in restricted environments.
-      }
-      try {
-        fs.symlinkSync(hiddenDirectory, directorySymlink, "dir");
-        hasDirectorySymlink = true;
-      } catch {
-        // Symlinks may be unavailable in restricted environments.
-      }
-
       const discovered = discoverFilesWithOptions(tmpRoot, {
         maxFileSize: 1000,
         denyGlobs: ["**/*.custom"],
       });
 
       expect(discovered).toEqual([hiddenSource, firstSource, lastSource]);
-      if (hasFileSymlink) expect(discovered).not.toContain(fileSymlink);
-      if (hasDirectorySymlink) expect(discovered).not.toContain(path.join(directorySymlink, "visible.ts"));
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("does not traverse an internal directory symlink", (context) => {
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "p-disc-dir-link-"));
+    try {
+      const sourceDirectory = path.join(tmpRoot, "source");
+      fs.mkdirSync(sourceDirectory);
+      const sourceFile = path.join(sourceDirectory, "source.ts");
+      fs.writeFileSync(sourceFile, "export const source = true;\n");
+      const directorySymlink = path.join(tmpRoot, "linked-source");
+      try {
+        fs.symlinkSync(sourceDirectory, directorySymlink, "dir");
+      } catch (error) {
+        if (symlinksUnavailable(error)) {
+          context.skip();
+          return;
+        }
+        throw error;
+      }
+
+      const discovered = discoverFilesWithOptions(tmpRoot, { maxFileSize: 1000 });
+      expect(discovered).toEqual([sourceFile]);
+      expect(discovered).not.toContain(path.join(directorySymlink, "source.ts"));
     } finally {
       fs.rmSync(tmpRoot, { recursive: true, force: true });
     }

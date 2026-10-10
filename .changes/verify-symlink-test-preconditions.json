@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "packages": ["coding-agent"],
+  "type": "None",
+  "reason": "Make code-index symlink security tests non-vacuous on hosts without symlink support; runtime behavior is unchanged."
+}
