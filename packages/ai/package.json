@@ -63,7 +63,7 @@
     "README.md"
   ],
   "scripts": {
-    "clean": "shx rm -rf dist",
+    "clean": "node ../../scripts/workspace-file-operations.js clean",
     "generate-models": "node scripts/generate-models.ts",
     "generate-image-models": "node scripts/generate-image-models.ts",
     "generate": "npm run generate-models && npm run generate-image-models",
