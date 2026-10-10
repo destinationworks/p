@@ -33,8 +33,8 @@
   },
   "dependencies": {
     "@qdrant/js-client-rest": "1.18.0",
-    "fast-glob": "3.3.3",
-    "ignore": "7.0.5"
+    "ignore": "7.0.5",
+    "tinyglobby": "0.2.17"
   },
   "devDependencies": {
     "@types/node": "24.12.4",

@@ -72,7 +72,7 @@ describe("file discovery and security boundary filtering", () => {
     }
   });
 
-  it("discovers symlinks targeting files contained within workspace root", () => {
+  it("does not index an internal file symlink twice", () => {
     const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "p-disc-internal-"));
     try {
       const targetFile = path.join(tmpRoot, "target.ts");
@@ -85,10 +85,57 @@ describe("file discovery and security boundary filtering", () => {
       }
 
       const discovered = discoverFilesWithOptions(tmpRoot, { maxFileSize: 10000 });
-      expect(discovered).toContain(targetFile);
-      if (fs.existsSync(symlinkPath)) {
-        expect(discovered.length).toBeGreaterThanOrEqual(1);
+      expect(discovered).toEqual([targetFile]);
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("honors hidden files, built-in and user exclusions, and internal symlink rules", () => {
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "p-disc-glob-contract-"));
+    try {
+      const hiddenDirectory = path.join(tmpRoot, ".hidden");
+      fs.mkdirSync(hiddenDirectory);
+      const hiddenSource = path.join(hiddenDirectory, "visible.ts");
+      const deniedSource = path.join(hiddenDirectory, "excluded.custom");
+      const excludedAsset = path.join(hiddenDirectory, "image.png");
+      const excludedDirectory = path.join(tmpRoot, "node_modules");
+      fs.mkdirSync(excludedDirectory);
+      const excludedDependency = path.join(excludedDirectory, "dependency.ts");
+      const lastSource = path.join(tmpRoot, "zeta.ts");
+      const firstSource = path.join(tmpRoot, "alpha.ts");
+      fs.writeFileSync(hiddenSource, "export const hidden = true;\n");
+      fs.writeFileSync(deniedSource, "export const denied = true;\n");
+      fs.writeFileSync(excludedAsset, "image contents");
+      fs.writeFileSync(excludedDependency, "export const excluded = true;\n");
+      fs.writeFileSync(lastSource, "export const last = true;\n");
+      fs.writeFileSync(firstSource, "export const first = true;\n");
+
+      const fileSymlink = path.join(tmpRoot, "linked.ts");
+      const directorySymlink = path.join(tmpRoot, "linked-hidden");
+      let hasFileSymlink = false;
+      let hasDirectorySymlink = false;
+      try {
+        fs.symlinkSync(hiddenSource, fileSymlink);
+        hasFileSymlink = true;
+      } catch {
+        // Symlinks may be unavailable in restricted environments.
       }
+      try {
+        fs.symlinkSync(hiddenDirectory, directorySymlink, "dir");
+        hasDirectorySymlink = true;
+      } catch {
+        // Symlinks may be unavailable in restricted environments.
+      }
+
+      const discovered = discoverFilesWithOptions(tmpRoot, {
+        maxFileSize: 1000,
+        denyGlobs: ["**/*.custom"],
+      });
+
+      expect(discovered).toEqual([hiddenSource, firstSource, lastSource]);
+      if (hasFileSymlink) expect(discovered).not.toContain(fileSymlink);
+      if (hasDirectorySymlink) expect(discovered).not.toContain(path.join(directorySymlink, "visible.ts"));
     } finally {
       fs.rmSync(tmpRoot, { recursive: true, force: true });
     }
