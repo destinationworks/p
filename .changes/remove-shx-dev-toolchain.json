@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "packages": ["agent", "ai", "coding-agent", "tui"],
+  "type": "None",
+  "reason": "Replace development-only shell file commands with native Node operations to remove vulnerable transitive tooling without changing published runtime behavior."
+}

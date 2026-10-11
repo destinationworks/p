@@ -165,6 +165,8 @@ test("constructs exact commands for every supported agent", () => {
         "--format",
         "json",
         "--pure",
+        "--title",
+        "P benchmark",
         "--auto",
         "--dir",
         workspace,

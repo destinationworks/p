@@ -24,7 +24,7 @@
     "README.md"
   ],
   "scripts": {
-    "clean": "shx rm -rf dist",
+    "clean": "node ../../scripts/workspace-file-operations.js clean",
     "build": "tsgo -p tsconfig.build.json",
     "benchmark:mps-precision": "node benchmarks/mps-precision/run.js",
     "test": "vitest --run && python3 -m unittest discover -s test -p 'test_*.py'",
@@ -33,8 +33,8 @@
   },
   "dependencies": {
     "@qdrant/js-client-rest": "1.18.0",
-    "fast-glob": "3.3.3",
-    "ignore": "7.0.5"
+    "ignore": "7.0.5",
+    "tinyglobby": "0.2.17"
   },
   "devDependencies": {
     "@types/node": "24.12.4",

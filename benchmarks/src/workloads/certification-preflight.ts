@@ -23,6 +23,8 @@ import {
 } from "./benchmark-run-finalization.ts";
 import type { CertifiedHarnessBinding } from "./certification-binding.ts";
 import { createCertifiedInstructionChallenge } from "./certification-instruction-challenge.ts";
+import { validateCertifiedProxyEvidence } from "./certification-proxy-evidence.ts";
+import { certifiedPreflightTimeoutSeconds } from "./certification-runtime-budget.ts";
 import { parseRecording } from "./recording-metrics.ts";
 import type { AgentId, RunnerOptions } from "./runner-options.ts";
 
@@ -132,21 +134,23 @@ export async function runCertifiedPreflights(
     let primaryError: unknown;
     let failed = false;
     const proxyCell = `preflight:${agent}`;
+    const preflightTimeoutSeconds = certifiedPreflightTimeoutSeconds(agent);
     const cleanupErrors: unknown[] = [];
 
     try {
-      proxy?.beginCell(proxyCell);
+      proxy?.beginCell(proxyCell, preflightTimeoutSeconds * 1000);
       assertCertifiedOutputWritePath(join(workspace, "AGENTS.md"));
       copyFileSync(binding.projectInstructions.path, join(workspace, "AGENTS.md"));
       initializeBenchmarkWorkspaceRepository(workspace);
       verifyWorkspaceInstructions(workspace, binding.projectInstructions.sha256);
 
       const prompt = CERTIFIED_PREFLIGHT_PROMPT;
-      const task = { prompt, timeoutSeconds: 60, isProbe: true };
+      const task = { prompt, timeoutSeconds: preflightTimeoutSeconds, isProbe: true };
       const turnOptions =
         agent === "p"
           ? {
               ...options,
+              taskVerificationMode: "off" as const,
               projectInstructionProofReceipt: createProjectInstructionTurnChallenge(
                 options.projectInstructionProofReceipt ?? "0".repeat(64),
                 1,
@@ -157,7 +161,7 @@ export async function runCertifiedPreflights(
 
       const rawCommand = commandForAgent(agent, turnOptions, task, configDir, workspace);
       const command = sandboxedCommandIfNeeded(rawCommand, options, workspace, configDir);
-      const timeoutMs = Math.min(60_000, Math.max(1_000, deadline - performance.now()));
+      const timeoutMs = Math.min(preflightTimeoutSeconds * 1000, Math.max(1_000, deadline - performance.now()));
 
       let turnResult: Awaited<ReturnType<typeof runRecordedCommand>>;
       try {
@@ -179,12 +183,35 @@ export async function runCertifiedPreflights(
 
       verifyWorkspaceInstructions(workspace, binding.projectInstructions.sha256);
 
+      if (turnResult.code !== 0 || turnResult.timedOut || turnResult.signal || turnResult.error) {
+        throw new Error(
+          `Certified ${agent} preflight process failed: exitCode=${turnResult.code} timedOut=${turnResult.timedOut} signal=${turnResult.signal ?? "none"} rawEvents=${turnResult.rawEventCount} stderrBytes=${Buffer.byteLength(turnResult.stderr)}`,
+        );
+      }
       const metrics = parseRecording(turnResult.stdout, agent);
-      const proxyEvidence = proxy?.endCell(proxyCell);
+      let proxyEvidence: CertifiedProxyEvidence | undefined;
+      try {
+        proxyEvidence = proxy?.endCell(proxyCell);
+      } catch (error) {
+        const reason =
+          error instanceof Error && error.message.startsWith("Certified proxy ")
+            ? error.message
+            : "unknown certified proxy failure";
+        throw new Error(
+          `Certified ${agent} preflight proxy failed after exitCode=${turnResult.code} rawEvents=${turnResult.rawEventCount} stderrBytes=${Buffer.byteLength(turnResult.stderr)}: ${reason}`,
+          { cause: error },
+        );
+      }
       const expectedModel = options.expectedResolvedModel ?? (agent === "kilo" ? options.kiloModel : options.model);
       const observedModels = metrics.responseModels ?? [];
+      const kiloWireOnly =
+        agent === "kilo" &&
+        metrics.responseModel === undefined &&
+        observedModels.length === 0 &&
+        validateCertifiedProxyEvidence(proxyEvidence, `instruction parity ${agent}`, expectedModel).length === 0;
       const modelMatched =
         !expectedModel ||
+        kiloWireOnly ||
         (metrics.responseModel === expectedModel &&
           observedModels.length > 0 &&
           observedModels.every((model) => model === expectedModel));

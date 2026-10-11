@@ -93,6 +93,7 @@ export async function createUIRegressionHarness(options: UISnapshotHarnessOption
 
   const typeText = async (text: string) => {
     terminal.sendInput(text);
+    await mode.defaultEditor.autocompleteRequestTask;
     await flush();
   };
 

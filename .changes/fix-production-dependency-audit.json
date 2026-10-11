@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "packages": ["coding-agent"],
+  "type": "Fixed",
+  "summary": "Replaced vulnerable production glob discovery and updated HTTP and shell dependency pins to remove reported production advisories."
+}

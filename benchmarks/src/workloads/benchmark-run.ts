@@ -106,9 +106,8 @@ export async function runAgentBenchmark(signal: AbortSignal): Promise<void> {
       rewriteCertifiedAgentConfigs(options, agentDirs.dirs, proxy.baseUrl);
     }
     if (options.agents.includes("kilo")) {
-      proxy?.beginCell("startup:kilo");
-      const evidence = await runKiloStartupProbe(options, agentDirs.dirs.kilo, output, deadline);
-      if (proxy) evidence.proxyEvidence = proxy.endCell("startup:kilo");
+      proxy?.beginCell("startup:kilo", options.kiloStartupTimeoutSeconds * 1000);
+      const evidence = await runKiloStartupProbe(options, agentDirs.dirs.kilo, output, deadline, undefined, proxy);
       startupProbes.kilo = evidence;
       console.log(`Kilo startup probe: passed, resolved ${evidence.resolvedModel}`);
     }
@@ -145,7 +144,7 @@ export async function runAgentBenchmark(signal: AbortSignal): Promise<void> {
         const recordingName = `${agent}-run-${run}-${task.id}.jsonl.br`;
         const stderrStem = `${agent}-run-${run}-${task.id}`;
         const proxyCell = `run:${run}:${agent}:${task.id}`;
-        proxy?.beginCell(proxyCell);
+        proxy?.beginCell(proxyCell, taskTimeout * 1000);
         let result: Awaited<ReturnType<typeof runAgentTask>>;
         try {
           result = await runAgentTask(

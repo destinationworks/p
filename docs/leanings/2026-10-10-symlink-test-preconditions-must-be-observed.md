@@ -1,0 +1,22 @@
+# 2026-10-10 — Symlink test preconditions must be observed
+
+- **Status:** Resolved
+- **Task/context:** Adversarial review of the `fast-glob` to `tinyglobby` migration in code indexing.
+- **Unexpected observation or failure:** Security tests silently ignored symlink creation errors, then asserted that discovery omitted the absent link. The tests could pass without exercising the boundary.
+- **Evidence:** The file and directory symlink fixtures caught all `symlinkSync` errors, and their discovery assertions still ran; the new glob-contract test guarded its symlink assertions behind creation booleans. No production regression was found in the migration.
+- **Approaches tried:**
+  - **Attempt:** Keep the conditional assertions because some hosts cannot create symlinks.
+    - **Outcome:** Rejected.
+    - **Why:** It reports a pass for an untested security property.
+  - **Attempt:** Fail every host that cannot create a symlink.
+    - **Outcome:** Rejected.
+    - **Why:** Capability-limited hosts cannot validate this property and should report an explicit skip.
+  - **Attempt:** Skip only recognized capability and filesystem errors (`EPERM`, `EACCES`, `ENOSYS`, `ENOTSUP`, `EOPNOTSUPP`) and rethrow unexpected errors.
+    - **Outcome:** Worked.
+    - **Why:** A passing test now requires a real symlink, while capability limits remain visible as skips.
+- **Root cause:** The fixture treated symlink creation as optional while treating the dependent assertion as unconditional success.
+- **Resolution:** Make file-symlink and directory-symlink cases explicit, skip on known capability errors, and keep hidden-file/glob exclusions in a separate always-run test.
+- **Verification:** Focused `file-discovery-security.test.ts` passed 6/6; full suite and root check remain required before publication.
+- **Prevention/follow-up:** `AGENTS.md` now requires proof of symlink fixture creation or an explicit capability skip.
+- **Reusable learning:** Assert the precondition of a security boundary test; if the host cannot satisfy it, report a skip rather than a pass.
+- **References:** `packages/code-index/test/file-discovery-security.test.ts`.

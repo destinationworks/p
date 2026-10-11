@@ -5,10 +5,10 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "clean": "shx rm -rf dist",
+    "clean": "node ../../scripts/workspace-file-operations.js clean",
     "build": "tsgo -p tsconfig.build.json",
     "test": "node --test test/*.test.ts",
-    "test:coverage": "shx mkdir -p coverage && node --test --experimental-test-coverage '--test-coverage-include=src/**/*.ts' --test-reporter=spec --test-reporter=lcov --test-reporter-destination=stdout --test-reporter-destination=coverage/lcov.info test/*.test.ts",
+    "test:coverage": "node ../../scripts/workspace-file-operations.js coverage-dir && node --test --experimental-test-coverage '--test-coverage-include=src/**/*.ts' --test-reporter=spec --test-reporter=lcov --test-reporter-destination=stdout --test-reporter-destination=coverage/lcov.info test/*.test.ts",
     "prepublishOnly": "npm run clean && npm run build"
   },
   "files": [

@@ -2,8 +2,8 @@ import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-import fg from "fast-glob";
 import ignore from "ignore";
+import { globSync } from "tinyglobby";
 
 import { EXCLUDE_DIRS, EXCLUDE_EXTS, LANG_MAP } from "./config.ts";
 
@@ -130,13 +130,14 @@ export function discoverFilesWithOptions(repoPath: string, options: DiscoverFile
   }
   ignorePatterns.push(...(options.denyGlobs ?? []));
 
-  const files = fg.sync(["**/*"], {
+  const files = globSync(["**/*"], {
     cwd: rootPath,
     onlyFiles: true,
     ignore: ignorePatterns,
     absolute: true,
     dot: true,
     followSymbolicLinks: false,
+    expandDirectories: false,
   });
 
   // Filter by size and readability

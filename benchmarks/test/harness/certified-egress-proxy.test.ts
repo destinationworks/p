@@ -70,7 +70,7 @@ test("certified proxy forwards unchanged model requests only to its fixed upstre
     });
     assert.equal(rejected.status, 403);
     assert.equal(received.length, 1, "A model mismatch must never reach upstream");
-    assert.throws(() => proxy.endCell("run-1:pi:calculator"), /rejected|missing/u);
+    assert.throws(() => proxy.endCell("run-1:pi:calculator"), /rejected.*rejectionKind=model-mismatch/u);
   } finally {
     await proxy.close();
     await close(upstream);
@@ -149,9 +149,15 @@ test("a held request body cannot escape the cell evidence boundary", async () =>
     assert.equal(normal.status, 200);
     await normal.text();
     assert.throws(() => proxy.endCell("held-body"), /pending/u);
+    proxy.beginCell("fresh-cell");
     held.end(fullBody.slice(1));
     assert.equal(await heldFinished, 403);
     assert.equal(forwarded, 1, "The held request must not reach upstream after the cell ends");
+    const fresh = await fetch(url, { method: "POST", body: fullBody });
+    assert.equal(fresh.status, 200);
+    await fresh.text();
+    assert.equal(proxy.endCell("fresh-cell").requestCount, 1);
+    assert.equal(forwarded, 2);
   } finally {
     await proxy.close();
     await close(upstream);
@@ -162,8 +168,10 @@ test("every forwarded completion needs its own successful model-bearing response
   let count = 0;
   const upstream = createServer((_request, reply) => {
     count += 1;
-    reply.writeHead(200, { "content-type": "text/event-stream" });
-    reply.end(count === 1 ? `data: ${JSON.stringify({ model })}\n\n` : "data: [DONE]\n\n");
+    reply.writeHead(count === 3 ? 503 : 200, { "content-type": "text/event-stream" });
+    reply.end(
+      count === 2 ? "data: [DONE]\n\n" : `data: ${JSON.stringify({ model: count === 4 ? "wrong/model" : model })}\n\n`,
+    );
   });
   const port = await listen(upstream);
   const proxy = await startCertifiedEgressProxy({
@@ -172,15 +180,18 @@ test("every forwarded completion needs its own successful model-bearing response
   });
   try {
     proxy.beginCell("two-responses");
-    for (let index = 0; index < 2; index += 1) {
+    for (let index = 0; index < 4; index += 1) {
       const response = await fetch(`${proxy.baseUrl}/chat/completions`, {
         method: "POST",
         body: JSON.stringify({ model, messages: [] }),
       });
-      assert.equal(response.status, 200);
+      assert.equal(response.status, index === 2 ? 503 : 200);
       await response.text();
     }
-    assert.throws(() => proxy.endCell("two-responses"), /response model evidence/u);
+    assert.throws(
+      () => proxy.endCell("two-responses"),
+      /response model evidence.*requests=4.*completed=1.*modelEvents=1.*nonSuccess=1.*missingModel=1.*mismatchedModel=1/u,
+    );
   } finally {
     await proxy.close();
     await close(upstream);

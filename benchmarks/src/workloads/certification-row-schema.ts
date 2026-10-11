@@ -17,22 +17,28 @@ export function validateCertifiedBenchmarkRow(value: unknown, index: number, exp
   if (typeof row.timedOut !== "boolean") invalid(`row[${index}].timedOut`, errors);
   if (row.error !== undefined && typeof row.error !== "string") invalid(`row[${index}].error`, errors);
   finiteAt(row.nudges, `row[${index}].nudges`, errors, { nonnegative: true });
-  validateMetrics(row.metrics, index, errors);
+  validateMetrics(row.metrics, index, errors, row.agent === "kilo");
   validateQuality(row.quality, index, errors, expectedMaxScore);
   return errors;
 }
 
-function validateMetrics(value: unknown, index: number, errors: string[]): void {
+function validateMetrics(value: unknown, index: number, errors: string[], kilo: boolean): void {
   const prefix = `row[${index}].metrics`;
   const metrics = recordAt(value, prefix, errors);
   if (!metrics) return;
   integerAt(metrics.toolCalls, `${prefix}.toolCalls`, errors, 0);
   integerAt(metrics.toolErrors, `${prefix}.toolErrors`, errors, 0);
-  stringAt(metrics.responseModel, `${prefix}.responseModel`, errors);
+  const missingKiloCliModel =
+    kilo &&
+    metrics.responseModel === undefined &&
+    (metrics.responseModels === undefined ||
+      (Array.isArray(metrics.responseModels) && metrics.responseModels.length === 0));
+  if (!missingKiloCliModel) stringAt(metrics.responseModel, `${prefix}.responseModel`, errors);
   if (
-    !Array.isArray(metrics.responseModels) ||
-    metrics.responseModels.length === 0 ||
-    !metrics.responseModels.every((model) => typeof model === "string" && model.trim())
+    !missingKiloCliModel &&
+    (!Array.isArray(metrics.responseModels) ||
+      metrics.responseModels.length === 0 ||
+      !metrics.responseModels.every((model) => typeof model === "string" && model.trim()))
   ) {
     invalid(`${prefix}.responseModels`, errors);
   }
