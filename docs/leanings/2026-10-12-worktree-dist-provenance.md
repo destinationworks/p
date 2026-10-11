@@ -1,0 +1,22 @@
+# 2026-10-12 — Fresh worktree dist provenance
+
+- **Status:** Resolved
+- **Task/context:** Running the P full suite from a fresh isolated worktree after centralized `./reinstall.sh`.
+- **Unexpected observation or failure:** Workspace imports failed without `dist`; symlinking the central install's `dist` made an indexing concurrency regression reject its daemon path as outside the source worktree.
+- **Evidence:** The installer built packages in `~/.p/install/versions`, leaving source-worktree `dist` absent. With six symlinked `dist` directories, the focused indexing test failed its source-provenance assertion; with physical copies from the same source-SHA snapshot, it passed 5/5 alongside the UI tests.
+- **Approaches tried:**
+  - **Attempt:** Run tests with the fresh worktree's absent `dist`.
+    - **Outcome:** Did not work.
+    - **Why:** Internal package imports resolve built workspace files.
+  - **Attempt:** Symlink `dist` to the centralized installed snapshot.
+    - **Outcome:** Did not work.
+    - **Why:** Canonical path resolution located the daemon outside the test worktree.
+  - **Attempt:** Physically copy the required `dist` directories from the exact source-SHA snapshot.
+    - **Outcome:** Worked.
+    - **Why:** Imports resolved and provenance remained inside the isolated checkout.
+- **Root cause:** Centralized installation and source-worktree tests have different artifact locations; symlinks preserve bytes but not canonical path ownership.
+- **Resolution:** Populate test-worktree `dist` with physical copies from a centralized snapshot whose source commit matches the checkout.
+- **Verification:** Focused indexing concurrency and UI tests passed 5/5 after replacing the symlinks.
+- **Prevention/follow-up:** `AGENTS.md` documents exact-SHA copying and prohibits symlinking for this setup.
+- **Reusable learning:** For path-sensitive test fixtures, artifact identity includes canonical location, not only file content.
+- **References:** `packages/coding-agent/test/indexing-reinstall-concurrency.test.ts`; `AGENTS.md`.
