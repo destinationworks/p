@@ -1,8 +1,10 @@
 import { devNull } from "node:os";
 import { dirname, join } from "node:path";
+import { certifiedGitExecutable } from "./certified-git-executable.ts";
 
 export function certifiedCandidateEnvironment(configDir: string, runtime?: string): NodeJS.ProcessEnv {
   const path = [
+    ...(process.platform === "darwin" ? [dirname(certifiedGitExecutable())] : []),
     ...(runtime ? [join(runtime, "node_modules", ".bin")] : []),
     dirname(process.execPath),
     "/opt/homebrew/bin",
