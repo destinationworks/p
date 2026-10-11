@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
+import type { CertifiedEgressProxy, CertifiedProxyEvidence } from "../harness/certified-egress-proxy.ts";
 import { assertCertifiedOutputWritePath } from "../harness/certified-output-integrity.ts";
 import {
   benchmarkStartupProbeFailure,
@@ -11,6 +12,7 @@ import { benchmarkStderrLogName, writeBenchmarkStderrLog } from "../harness/stde
 import { commandForAgent, commandForKiloModelResolution, sandboxedCommandIfNeeded } from "./agent-command.ts";
 import { type AgentTaskResult, type CommandRunOptions, runRecordedCommand } from "./agent-turn-runner.ts";
 import { isBenchmarkMutableArtifactsUnsafeError } from "./benchmark-run-finalization.ts";
+import { validateCertifiedProxyEvidence } from "./certification-proxy-evidence.ts";
 import { parseRecording, type RecordingMetrics } from "./recording-metrics.ts";
 import type { RunnerOptions } from "./runner-options.ts";
 
@@ -42,6 +44,7 @@ export type KiloStartupEvidence = {
   request?: CommandProbeEvidence & { responseMatched: boolean; errors: string[] };
   error?: string;
   runtimeFiles?: { data: string[]; state: string[] };
+  proxyEvidence?: CertifiedProxyEvidence;
 };
 
 export type AgyStartupEvidence = Partial<Omit<CommandProbeEvidence, "status">> & {
@@ -108,6 +111,7 @@ export async function runKiloStartupProbe(
   output: string,
   deadline: number,
   runCommand: typeof runRecordedCommand = runRecordedCommand,
+  proxy?: Pick<CertifiedEgressProxy, "endCell">,
 ): Promise<KiloStartupEvidence> {
   const diagnosticsDir = join(output, "diagnostics", "kilo-startup");
   const workspace = join(configDir, "startup-probe-workspace");
@@ -174,14 +178,24 @@ export async function runKiloStartupProbe(
       requestCommand,
       Math.min(options.kiloStartupTimeoutSeconds * 1000, Math.max(1, deadline - performance.now())),
       join(diagnosticsDir, requestRecording),
-      { stopOnMarker: marker, signal: options.signal },
+      { signal: options.signal },
     );
     const requestStderr = writeBenchmarkStderrLog(diagnosticsDir, "request.stderr", requestResult.stderr);
     const metrics = parseRecording(requestResult.stdout, "kilo");
     const responseMatched = metrics.finalText.trim() === marker;
     const observedModels = metrics.responseModels ?? [];
-    const modelMatched =
-      observedModels.length > 0 && observedModels.every((model) => model === options.expectedResolvedModel);
+    const cliModelMatched = observedModels.every((model) => model === options.expectedResolvedModel);
+    if (options.certified) {
+      if (!proxy) throw new Error("Certified Kilo startup requires independent proxy evidence");
+      evidence.proxyEvidence = proxy.endCell("startup:kilo");
+      const proxyFailures = validateCertifiedProxyEvidence(
+        evidence.proxyEvidence,
+        "Kilo startup",
+        options.expectedResolvedModel,
+      );
+      if (proxyFailures.length > 0) throw new Error(proxyFailures.join("; "));
+    }
+    const modelMatched = cliModelMatched && (observedModels.length > 0 || options.certified);
     const cleanProcess =
       !requestResult.timedOut && requestResult.code === 0 && !requestResult.signal && !requestResult.error;
     const requestPassed = cleanProcess && metrics.errors.length === 0 && responseMatched && modelMatched;

@@ -6,16 +6,19 @@ const HASH_RE = /^[a-f0-9]{64}$/u;
 
 function validateReceiptShape(receipt: CertifiedInstructionReceipt, failures: string[]): void {
   const { agent, elapsedMs, receiptSha256, responseModel, responseModels } = receipt;
+  const kiloWireOnly =
+    agent === "kilo" && responseModel === undefined && (!responseModels || responseModels.length === 0);
   if (typeof receiptSha256 !== "string" || !HASH_RE.test(receiptSha256)) {
     failures.push(`Malformed receipt hash for agent: ${agent}`);
   }
-  if (typeof responseModel !== "string" || !responseModel.trim()) {
+  if (!kiloWireOnly && (typeof responseModel !== "string" || !responseModel.trim())) {
     failures.push(`Missing responseModel in instruction parity receipt for agent: ${agent}`);
   }
   if (
-    !Array.isArray(responseModels) ||
-    responseModels.length === 0 ||
-    responseModels.some((model) => typeof model !== "string" || !model)
+    !kiloWireOnly &&
+    (!Array.isArray(responseModels) ||
+      responseModels.length === 0 ||
+      responseModels.some((model) => typeof model !== "string" || !model))
   ) {
     failures.push(`Missing responseModels in instruction parity receipt for agent: ${agent}`);
   }

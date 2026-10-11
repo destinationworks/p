@@ -58,6 +58,25 @@ test("instruction parity receipt requires independent matching proxy evidence", 
   assert.match(failures.join("\n"), /missing certified proxy evidence for instruction parity p/u);
 });
 
+test("Kilo instruction parity accepts absent CLI model only with matching wire evidence", () => {
+  const valid = [validReceipt("p", "1"), validReceipt("pi", "2"), validReceipt("kilo", "3")];
+  const kilo = valid[2]!;
+  delete (kilo as Partial<typeof kilo>).responseModel;
+  delete (kilo as Partial<typeof kilo>).responseModels;
+  const evaluate = () =>
+    evaluateInstructionParityReceipts(
+      bindingWithReceipts(valid) as Parameters<typeof evaluateInstructionParityReceipts>[0],
+      ["p", "pi", "kilo"],
+      "resolved/model",
+    );
+  assert.deepEqual(evaluate(), []);
+  kilo.proxyEvidence.responseModels = ["wrong/model"];
+  assert.match(evaluate().join("\n"), /proxy response model mismatch/u);
+  kilo.proxyEvidence.responseModels = ["resolved/model"];
+  kilo.responseModels = ["wrong/model", "resolved/model"];
+  assert.match(evaluate().join("\n"), /Instruction parity model mismatch/u);
+});
+
 test("certified advertised arguments auto-create proof authority and reject P-only thinking", () => {
   const options = parseRunnerArgs([
     "--certified",

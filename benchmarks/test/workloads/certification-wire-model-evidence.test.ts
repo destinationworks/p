@@ -47,3 +47,41 @@ test("every scored cell requires matching independent wire-model evidence", () =
     /invalid proxy request hash evidence for run 1 p\/typescript-calculator/u,
   );
 });
+
+test("Kilo rows may omit CLI model fields only when independent wire evidence matches", () => {
+  const missingCli = createSyntheticCertifiedMatrix({
+    modifyCell: (row) => {
+      if (row.agent === "kilo") {
+        delete row.metrics?.responseModel;
+        delete row.metrics?.responseModels;
+      }
+      return row;
+    },
+  });
+  assert.equal(evaluateCertification(missingCli, options).passed, true);
+
+  const mismatchedCli = createSyntheticCertifiedMatrix({
+    modifyCell: (row) => {
+      if (row.agent === "kilo") {
+        row.metrics!.responseModel = "wrong/model";
+        row.metrics!.responseModels = ["wrong/model", "resolved/test-model"];
+      }
+      return row;
+    },
+  });
+  assert.equal(evaluateCertification(mismatchedCli, options).passed, false);
+
+  const missingOther = createSyntheticCertifiedMatrix({
+    modifyCell: (row) => {
+      if (row.agent === "pi") {
+        delete row.metrics?.responseModel;
+        delete row.metrics?.responseModels;
+      }
+      return row;
+    },
+  });
+  assert.equal(evaluateCertification(missingOther, options).passed, false);
+
+  missingCli.find((row) => row.agent === "kilo")!.proxyEvidence!.responseModels = ["wrong/model"];
+  assert.equal(evaluateCertification(missingCli, options).passed, false);
+});

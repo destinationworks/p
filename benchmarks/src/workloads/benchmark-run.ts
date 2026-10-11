@@ -107,8 +107,7 @@ export async function runAgentBenchmark(signal: AbortSignal): Promise<void> {
     }
     if (options.agents.includes("kilo")) {
       proxy?.beginCell("startup:kilo", options.kiloStartupTimeoutSeconds * 1000);
-      const evidence = await runKiloStartupProbe(options, agentDirs.dirs.kilo, output, deadline);
-      if (proxy) evidence.proxyEvidence = proxy.endCell("startup:kilo");
+      const evidence = await runKiloStartupProbe(options, agentDirs.dirs.kilo, output, deadline, undefined, proxy);
       startupProbes.kilo = evidence;
       console.log(`Kilo startup probe: passed, resolved ${evidence.resolvedModel}`);
     }
