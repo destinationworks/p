@@ -9,11 +9,11 @@ import {
 import { request as httpsRequest } from "node:https";
 import { verifiedCertifiedProxyCa } from "./certified-proxy-ca.ts";
 import { maxCertifiedProxyCellMillis } from "./certified-proxy-deadline-policy.ts";
+import { certifiedProxyForwardErrorKind } from "./certified-proxy-forward-error.ts";
 import { closeCertifiedProxyServer, openCertifiedProxyLoopbacks } from "./certified-proxy-listeners.ts";
 import * as policy from "./certified-proxy-request-policy.ts";
 import { createCertifiedResponseModelCollector } from "./certified-proxy-response-models.ts";
 import { assertCertifiedProxyUpstreamOptions } from "./certified-proxy-upstream-policy.ts";
-
 export interface CertifiedEgressProxyOptions {
   upstreamBaseUrl: string;
   expectedModel: string;
@@ -126,10 +126,10 @@ export class CertifiedEgressProxy {
       reply.destroy();
     }, this.activeRequestTimeoutMillis);
     const work = this.forward(request, reply)
-      .catch(() => {
+      .catch((error: unknown) => {
         request.resume();
         if (cell) cell.rejected += 1;
-        if (cell) cell.rejectionKind ??= "forward-error";
+        if (cell) cell.rejectionKind ??= certifiedProxyForwardErrorKind(error);
         if (!reply.headersSent && !reply.destroyed) reply.writeHead(502);
         if (!reply.writableEnded && !reply.destroyed) reply.end();
       })

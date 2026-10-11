@@ -128,6 +128,10 @@ link validation; all other retained symlinks and hard links still fail closed.
 ### Kilo Code CLI
 
 Uses `~/.config/kilo/kilo.jsonc` (or `--kilo-config`). Set the model via `--kilo-model`.
+Benchmark Kilo runs supply a fixed non-default session title. Without it, Kilo
+may start an additional title-generation model request and cancel that request
+after the answer; certified proxy evidence then correctly rejects the cell as
+an incomplete completion. The title does not replace or alter the task prompt.
 
 ### Codex CLI
 

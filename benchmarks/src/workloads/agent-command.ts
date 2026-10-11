@@ -94,6 +94,7 @@ export function commandForAgent(
   }
   if (agent === "kilo") {
     const args = ["run", "--model", required(options.kiloModel, "--kilo-model"), "--format", "json", "--pure"];
+    args.push("--title", "P benchmark");
     if (!task.isProbe) args.push("--auto");
     args.push("--dir", workspace);
     if (isContinue) args.push("--continue");
