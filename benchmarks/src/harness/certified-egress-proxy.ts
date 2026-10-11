@@ -8,6 +8,7 @@ import {
 } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { verifiedCertifiedProxyCa } from "./certified-proxy-ca.ts";
+import { maxCertifiedProxyCellMillis } from "./certified-proxy-deadline-policy.ts";
 import { closeCertifiedProxyServer, openCertifiedProxyLoopbacks } from "./certified-proxy-listeners.ts";
 import { createCertifiedResponseModelCollector } from "./certified-proxy-response-models.ts";
 
@@ -45,6 +46,7 @@ export class CertifiedEgressProxy {
   private readonly upstreamTerminations = new Set<Promise<void>>();
   private readonly inFlight = new Set<Promise<void>>();
   private bufferedRequestBytes = 0;
+  private activeRequestTimeoutMillis = requestTimeoutMillis;
   private active?: ActiveCell;
   private closed = false;
   constructor(options: CertifiedEgressProxyOptions, port: number, servers: Server[]) {
@@ -55,8 +57,12 @@ export class CertifiedEgressProxy {
     this.expectedModel = options.expectedModel;
     this.ca = this.upstream.protocol === "https:" ? verifiedCertifiedProxyCa() : undefined;
   }
-  beginCell(label: string): void {
+  beginCell(label: string, timeoutMillis = requestTimeoutMillis): void {
     if (this.closed || this.active) throw new Error("Certified proxy cell already active or closed");
+    if (!Number.isSafeInteger(timeoutMillis) || timeoutMillis < 1 || timeoutMillis > maxCertifiedProxyCellMillis) {
+      throw new Error("Certified proxy cell request timeout must be a bounded positive integer");
+    }
+    this.activeRequestTimeoutMillis = timeoutMillis;
     this.active = {
       label,
       pending: 0,
@@ -110,7 +116,7 @@ export class CertifiedEgressProxy {
     const deadline = setTimeout(() => {
       request.destroy();
       reply.destroy();
-    }, requestTimeoutMillis);
+    }, this.activeRequestTimeoutMillis);
     const work = this.forward(request, reply)
       .catch(() => {
         request.resume();

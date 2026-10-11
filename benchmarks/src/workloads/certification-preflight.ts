@@ -135,7 +135,7 @@ export async function runCertifiedPreflights(
     const cleanupErrors: unknown[] = [];
 
     try {
-      proxy?.beginCell(proxyCell);
+      proxy?.beginCell(proxyCell, 60_000);
       assertCertifiedOutputWritePath(join(workspace, "AGENTS.md"));
       copyFileSync(binding.projectInstructions.path, join(workspace, "AGENTS.md"));
       initializeBenchmarkWorkspaceRepository(workspace);

@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "packages": ["coding-agent"],
+  "type": "None",
+  "reason": "Benchmark harness fix: allow bounded slow-model responses within certified cell budgets."
+}

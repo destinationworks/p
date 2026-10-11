@@ -70,6 +70,7 @@
 - When adding a test under `scripts/`, inspect the root npm test scripts; if its parent suite enumerates files explicitly, add the new file in the same change and run that parent script at least once.
 - Temporary release Git fixtures that recursively delete repositories, remotes, or clones must disable repository-local automatic and detached maintenance/GC unless the test explicitly owns and joins that background lifecycle.
 - Successful child-process regressions must give their kill timeout measured full-suite load margin rather than setting it near the focused runtime.
+- Certified benchmark proxy completion deadlines must cover the bounded startup, preflight, or task-cell budget; a fixed short proxy timeout can silently invalidate a slow real-model comparison before the agent's own deadline.
 - Fake child processes with fixed PIDs must stub process-group signaling and liveness calls; never let a unit test send real signals to a host process group.
 - Symlink security tests must prove link creation occurred or explicitly skip on an unsupported capability; never let a missing link make the assertion pass vacuously.
 - Visual snapshot tests that trigger asynchronous UI work must await the feature's completion signal before capturing the viewport; a fixed sleep is not proof that autocomplete or rendering finished.
