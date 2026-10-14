@@ -163,6 +163,7 @@ function matchesPattern(source: string, baseDirectory: string, pattern: string, 
         nonegate: true,
       });
       // Bounded cache to avoid memory leaks on very large projects
+      /* istanbul ignore next */
       if (minimatchCache.size > 2000) {
         minimatchCache.clear();
       }
