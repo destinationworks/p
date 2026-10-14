@@ -33,3 +33,11 @@
 ## 2024-05-18 - Pre-compiled regex avoids array allocations from .split('/')
 **Learning:** Checking for boundary characters inside a tight string-matching loop (such as verifying file paths in `isSkippedWorkspaceEffectPath`) using `.split('/').some(...)` allocates an intermediate array and multiple substring instances on every path check. Using a single precompiled regex with bounded segments is cleaner and faster.
 **Action:** Replace `.split('/').some(...)` boundary checks with a pre-compiled regex with `(?:\/|^)` and `(?:\/|$)` boundaries. Also, correctly escape regex literals (e.g., `.` or `?`) when building patterns dynamically from static strings using `str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")`.
+
+## 2026-10-14 - Use bounded Map cache for Minimatch instantiation in tight loops
+**Learning:** Instantiating  or calling  repeatedly in hot paths for file inclusion scanning (like ) creates unnecessary regular expression recompilation overhead, resulting in 15x slower execution time (800ms vs 50ms for 5000 path checks).
+**Action:** Use a bounded  cache (e.g., evicting at size > 2000) to memoize and reuse  instances per pattern in tight, frequent execution loops.
+
+## 2026-10-14 - Use bounded Map cache for Minimatch instantiation in tight loops
+**Learning:** Calling `minimatch()` repeatedly in hot paths for file inclusion scanning (like `typeScriptProjectsCoverSources`) creates unnecessary regular expression recompilation overhead, resulting in ~15x slower execution time (800ms vs 50ms for 5000 path checks).
+**Action:** Use a bounded `Map` cache (e.g., evicting at size > 2000) to memoize and reuse `Minimatch` instances per pattern in tight, frequent execution loops.
