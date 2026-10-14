@@ -1,1 +1,1 @@
-{"schemaVersion": 1, "type": "None", "packages": ["@dst0/p"], "reason": "Optimized Minimatch instantiation in typescript-project-scope hot path."}
+{"schemaVersion": 1, "type": "None", "packages": ["coding-agent"], "reason": "Optimized Minimatch instantiation in typescript-project-scope hot path."}
