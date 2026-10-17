@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "type": "None",
+  "reason": "Internal non-user-facing performance optimizations to avoid O(N) array allocation overhead.",
+  "packages": [
+    "coding-agent"
+  ]
+}

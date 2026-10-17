@@ -129,16 +129,28 @@ export function evidenceBatchMatchesRequirement(requirement: TaskRequirement, se
   const qualifiers = qualifierPolarities(text);
   const compatible = selectors.filter((selector) => {
     const selectorDomains = domainFamilies(selector);
-    if (![...domains].some((domain) => selectorDomains.has(domain))) return false;
+    // Optimization: Replacing [...Set].some() with a for...of loop avoids O(N) array allocation overhead
+    let hasDomainCoverage = false;
+    for (const domain of domains) {
+      if (selectorDomains.has(domain)) {
+        hasDomainCoverage = true;
+        break;
+      }
+    }
+    if (!hasDomainCoverage) return false;
     const overlap = new Set(relevantTerms(selector).filter((term) => subjects.has(term)));
     if (overlap.size < Math.min(2, subjects.size)) return false;
     const selectorBehaviors = semanticFamilies(selector, BEHAVIOR_FAMILIES);
-    if (
-      behaviors.size > 0 &&
-      selectorBehaviors.size > 0 &&
-      ![...behaviors].some((behavior) => selectorBehaviors.has(behavior))
-    ) {
-      return false;
+    if (behaviors.size > 0 && selectorBehaviors.size > 0) {
+      // Optimization: Replacing [...Set].some() with a for...of loop avoids O(N) array allocation overhead
+      let hasBehaviorCoverage = false;
+      for (const behavior of behaviors) {
+        if (selectorBehaviors.has(behavior)) {
+          hasBehaviorCoverage = true;
+          break;
+        }
+      }
+      if (!hasBehaviorCoverage) return false;
     }
     // Only check contradictions here; complete qualifier coverage is required for the final batch below.
     return hasQualifierCoverage(qualifiers, new Set([...qualifiers, ...qualifierPolarities(selector)]));
@@ -190,7 +202,11 @@ function hasBehaviorCoverage(
 }
 
 function hasUnsafeQualifier(value: string): boolean {
-  return [...qualifierPolarities(value)].some((qualifier) => qualifier.endsWith(":unsafe"));
+  // Optimization: Replacing [...Set].some() with a for...of loop avoids O(N) array allocation overhead
+  for (const qualifier of qualifierPolarities(value)) {
+    if (qualifier.endsWith(":unsafe")) return true;
+  }
+  return false;
 }
 
 function qualifierPolarities(value: string): Set<string> {
