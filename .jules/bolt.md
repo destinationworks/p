@@ -33,3 +33,8 @@
 ## 2024-05-18 - Pre-compiled regex avoids array allocations from .split('/')
 **Learning:** Checking for boundary characters inside a tight string-matching loop (such as verifying file paths in `isSkippedWorkspaceEffectPath`) using `.split('/').some(...)` allocates an intermediate array and multiple substring instances on every path check. Using a single precompiled regex with bounded segments is cleaner and faster.
 **Action:** Replace `.split('/').some(...)` boundary checks with a pre-compiled regex with `(?:\/|^)` and `(?:\/|$)` boundaries. Also, correctly escape regex literals (e.g., `.` or `?`) when building patterns dynamically from static strings using `str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")`.
+## $(date +%Y-%m-%d) - Spread Operator with Sets inside some() causes O(N*M) Allocation
+
+**Learning:** When using the `.some()` function inside a loop or checking elements against a Set, converting the Set to an array using the spread operator (`[...MySet].some()`) causes significant memory allocations. If this happens inside a nested loop, it results in O(N*M) array allocations and puts tremendous pressure on the garbage collector.
+
+**Action:** Replace `[...MySet].some(...)` checks with `for...of` loops and explicit `return`/`break` logic to short circuit the search. This pattern avoids all intermediate array allocations and retains the same early exit characteristics of `.some()`.

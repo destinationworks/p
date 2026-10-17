@@ -247,9 +247,18 @@ function directTestInvocation(words: readonly string[]): TestCommandInvocation |
 function packageManagerTestInvocation(executable: string, words: readonly string[]): TestCommandInvocation | undefined {
   const index = packageSubcommandIndex(words, PACKAGE_OPTIONS_WITH_VALUE);
   const command = words[index];
-  const scopeNarrowed = words
-    .slice(1, index)
-    .some((word) => [...PACKAGE_SCOPE_OPTIONS].some((option) => word === option || word.startsWith(`${option}=`)));
+  const scopeNarrowedWords = words.slice(1, index);
+  let scopeNarrowed = false;
+  // Optimization: Replacing nested .some() on spread Set with a for...of loop avoids O(N*M) array allocation and iteration overhead
+  for (const word of scopeNarrowedWords) {
+    for (const option of PACKAGE_SCOPE_OPTIONS) {
+      if (word === option || word.startsWith(`${option}=`)) {
+        scopeNarrowed = true;
+        break;
+      }
+    }
+    if (scopeNarrowed) break;
+  }
   if (command === "test") {
     return {
       args: packageRunnerArgs(words.slice(index + 1)),

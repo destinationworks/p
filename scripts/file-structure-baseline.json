@@ -367,6 +367,14 @@
     "classes": 0,
     "lines": 395
   },
+  "packages/coding-agent/src/core/task-verification/taskverificationcontroller-methods/test-command-invocation.ts": {
+    "classes": 0,
+    "lines": 308
+  },
+  "packages/coding-agent/src/core/task-verification/taskverificationcontroller-methods/test-invocation-selection.ts": {
+    "classes": 0,
+    "lines": 304
+  },
   "packages/coding-agent/src/index.ts": {
     "classes": 0,
     "lines": 402
