@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "packages": ["@dst0/p"],
+  "packages": ["coding-agent"],
   "type": "None",
   "reason": "Optimize string sanitization in compiler scope"
 }
