@@ -5,6 +5,8 @@ const PROTECTED_DATA_PATTERN =
   /\b(?:api[- ]?keys?|credentials?|customer data|personal data|private keys?|secrets?|sensitive (?:data|information)|(?:access|auth(?:entication)?|bearer|credential|secret) tokens?)\b/iu;
 const PROTECTION_DIRECTIVE_PATTERN = /\b(?:be (?:very )?careful|do not|don't|must not|never|protect|redact)\b/iu;
 const EXPLICIT_ACTIVITY_SCOPE_PATTERN = /\b(?:after|before|during|if|prior\s+to|when|whenever|while)\b/iu;
+const NON_ASCII_LETTER_PATTERN = /[^\P{L}A-Za-z]/u;
+
 const BROAD_PROTECTION_HEADING_TERMS = new Set([
   "agent",
   "api",
@@ -63,7 +65,8 @@ export function requiresConservativeAlwaysOn(constraint: ProjectInstructionConst
     constraint.kind === "orphan-heading" ||
     isUnmistakablyGlobalConstraint(sourceText) ||
     isUnqualifiedCrossCuttingDataProtection(constraint) ||
-    [...sourceText].some((character) => /\p{L}/u.test(character) && !/[A-Za-z]/u.test(character))
+    // ⚡ Bolt: Use a pre-compiled RegExp rather than allocating an intermediate array via [...string]
+    NON_ASCII_LETTER_PATTERN.test(sourceText)
   );
 }
 
