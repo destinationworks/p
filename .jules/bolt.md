@@ -33,3 +33,7 @@
 ## 2024-05-18 - Pre-compiled regex avoids array allocations from .split('/')
 **Learning:** Checking for boundary characters inside a tight string-matching loop (such as verifying file paths in `isSkippedWorkspaceEffectPath`) using `.split('/').some(...)` allocates an intermediate array and multiple substring instances on every path check. Using a single precompiled regex with bounded segments is cleaner and faster.
 **Action:** Replace `.split('/').some(...)` boundary checks with a pre-compiled regex with `(?:\/|^)` and `(?:\/|$)` boundaries. Also, correctly escape regex literals (e.g., `.` or `?`) when building patterns dynamically from static strings using `str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")`.
+
+## 2024-05-18 - Pre-compiled regex avoids array allocations from spread operator
+**Learning:** Checking for complex character conditions (like checking for non-ASCII letters) using the spread operator to expand a string into an array of characters (e.g., `[...string].some(...)`) and running tests per character is significantly slower (~10x) than simply using a single pre-compiled `RegExp` with negated character classes (e.g., `/[^\P{L}A-Za-z]/u`). The array allocation and per-character iteration overhead is entirely unnecessary.
+**Action:** Replace `[...string].some(...)` character checks with a single pre-compiled Regex.

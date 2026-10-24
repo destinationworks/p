@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "type": "None",
+  "reason": "Internal optimization: use pre-compiled regex for non-ascii checking instead of expanding string to array",
+  "packages": ["coding-agent"]
+}
