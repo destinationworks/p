@@ -94,8 +94,22 @@ function describeActionSemantics(toolName: string, args: unknown, toolDescriptio
 
 function addShellSemantics(labels: Set<string>, command: string, mutates: boolean): void {
   const invocations = tokenizeShellCommands(command);
-  const words = invocations.flat().map((word) => word.toLocaleLowerCase("en-US"));
-  const names = new Set(words.map((word) => word.split("/").at(-1) ?? word));
+
+  // ⚡ Bolt: Replace map and Array allocations with single pass over tokens
+  const words: string[] = [];
+  const names = new Set<string>();
+
+  for (let i = 0; i < invocations.length; i++) {
+    const invocation = invocations[i]!;
+    for (let j = 0; j < invocation.length; j++) {
+      const lowerWord = invocation[j]!.toLocaleLowerCase("en-US");
+      words.push(lowerWord);
+
+      const lastSlash = lowerWord.lastIndexOf("/");
+      names.add(lastSlash !== -1 ? lowerWord.substring(lastSlash + 1) : lowerWord);
+    }
+  }
+
   if (mutates) labels.add("file modification code changes");
   if (invocations.some(isTestInvocation)) {
     labels.add("test testing verification");
@@ -113,11 +127,11 @@ function addShellSemantics(labels: Set<string>, command: string, mutates: boolea
   if (names.has("release")) labels.add("release version changelog");
   if (names.has("reinstall")) labels.add("reinstall build installation");
   if (names.has("version-bump")) labels.add("version bump release changelog");
-  if ([...names].some((name) => /^(?:rm|rmdir|unlink|trash)$/u.test(name))) {
+  if (names.has("rm") || names.has("rmdir") || names.has("unlink") || names.has("trash")) {
     labels.add("file delete deletion remove removal");
   }
-  if ([...names].some((name) => /^(?:biome|prettier)$/u.test(name))) labels.add("format formatting");
-  if ([...names].some((name) => /^(?:migrate|migration)$/u.test(name))) labels.add("database migration");
+  if (names.has("biome") || names.has("prettier")) labels.add("format formatting");
+  if (names.has("migrate") || names.has("migration")) labels.add("database migration");
 }
 
 function shellActionIdentityQuery(command: string): string {
@@ -137,12 +151,32 @@ function shellActionIdentityQuery(command: string): string {
 }
 
 function isTestInvocation(words: readonly string[]): boolean {
-  const normalized = words.map((word) => word.toLocaleLowerCase("en-US"));
-  const executable = normalized[0]?.split("/").at(-1);
+  if (words.length === 0) return false;
+  // ⚡ Bolt: Eliminate `.map()` array allocation for lowercase words
+  const word0 = words[0]!.toLocaleLowerCase("en-US");
+  const lastSlash = word0.lastIndexOf("/");
+  const executable = lastSlash !== -1 ? word0.substring(lastSlash + 1) : word0;
+
   if (!executable) return false;
   if (/^(?:vitest|jest|pytest|rspec|test)$/u.test(executable)) return true;
-  if (executable === "node") return normalized.includes("--test");
-  if (["cargo", "go"].includes(executable)) return normalized[1] === "test";
-  if (!["npm", "pnpm", "yarn", "bun"].includes(executable)) return false;
-  return normalized[1] === "test" || (normalized[1] === "run" && normalized[2]?.startsWith("test") === true);
+
+  if (executable === "node") {
+    for (let i = 1; i < words.length; i++) {
+      if (words[i]!.toLocaleLowerCase("en-US") === "--test") return true;
+    }
+    return false;
+  }
+
+  if (words.length > 1 && (executable === "cargo" || executable === "go")) {
+    return words[1]!.toLocaleLowerCase("en-US") === "test";
+  }
+
+  if (executable === "npm" || executable === "pnpm" || executable === "yarn" || executable === "bun") {
+    if (words.length < 2) return false;
+    const word1 = words[1]!.toLocaleLowerCase("en-US");
+    if (word1 === "test") return true;
+    if (word1 === "run" && words.length > 2 && words[2]!.toLocaleLowerCase("en-US").startsWith("test")) return true;
+  }
+
+  return false;
 }

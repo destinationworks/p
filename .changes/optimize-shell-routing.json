@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "type": "None",
+  "reason": "Optimize hot paths in agent-session routing and shell action classification to reduce array and string allocations.",
+  "packages": [
+    "@dst0/p"
+  ]
+}
