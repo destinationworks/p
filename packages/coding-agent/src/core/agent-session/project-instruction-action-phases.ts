@@ -67,13 +67,36 @@ export function inferProjectInstructionActionPhases(
 function addShellPhases(phases: Set<ProjectInstructionWorkPhase>, args: unknown): void {
   const commands = tokenizeShellCommands(shellCommand(args));
   for (const words of commands) {
-    const names = words.map((word) => word.toLocaleLowerCase("en-US").split("/").at(-1) ?? word);
-    if (names.some((name) => DISCOVERY_COMMANDS.has(name))) phases.add("discovery");
-    if (names.some((name) => TEST_COMMAND_PATTERN.test(name))) phases.add("testing");
-    if (names.some((name) => VERIFICATION_COMMAND_PATTERN.test(name))) phases.add("verification");
-    if (names.some((name) => DELIVERY_COMMAND_PATTERN.test(name))) phases.add("delivery");
-    const gitIndex = names.indexOf("git");
-    const gitSubcommand = gitIndex >= 0 ? names.slice(gitIndex + 1).find((name) => !name.startsWith("-")) : undefined;
+    // ⚡ Bolt: Replace map, some, indexOf, and slice with a single iteration
+    let hasDiscovery = false;
+    let hasTesting = false;
+    let hasVerification = false;
+    let hasDelivery = false;
+    let gitIndex = -1;
+    let gitSubcommand: string | undefined;
+
+    for (let i = 0; i < words.length; i++) {
+      const word = words[i]!.toLocaleLowerCase("en-US");
+      const lastSlash = word.lastIndexOf("/");
+      const name = lastSlash !== -1 ? word.substring(lastSlash + 1) : word;
+
+      if (!hasDiscovery && DISCOVERY_COMMANDS.has(name)) hasDiscovery = true;
+      if (!hasTesting && TEST_COMMAND_PATTERN.test(name)) hasTesting = true;
+      if (!hasVerification && VERIFICATION_COMMAND_PATTERN.test(name)) hasVerification = true;
+      if (!hasDelivery && DELIVERY_COMMAND_PATTERN.test(name)) hasDelivery = true;
+
+      if (gitIndex === -1 && name === "git") {
+        gitIndex = i;
+      } else if (gitIndex !== -1 && !gitSubcommand && !name.startsWith("-")) {
+        gitSubcommand = name;
+      }
+    }
+
+    if (hasDiscovery) phases.add("discovery");
+    if (hasTesting) phases.add("testing");
+    if (hasVerification) phases.add("verification");
+    if (hasDelivery) phases.add("delivery");
+
     if (gitSubcommand && DELIVERY_GIT_SUBCOMMANDS.has(gitSubcommand)) phases.add("delivery");
     if (gitSubcommand && DISCOVERY_GIT_SUBCOMMANDS.has(gitSubcommand)) phases.add("discovery");
   }

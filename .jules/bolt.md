@@ -33,3 +33,7 @@
 ## 2024-05-18 - Pre-compiled regex avoids array allocations from .split('/')
 **Learning:** Checking for boundary characters inside a tight string-matching loop (such as verifying file paths in `isSkippedWorkspaceEffectPath`) using `.split('/').some(...)` allocates an intermediate array and multiple substring instances on every path check. Using a single precompiled regex with bounded segments is cleaner and faster.
 **Action:** Replace `.split('/').some(...)` boundary checks with a pre-compiled regex with `(?:\/|^)` and `(?:\/|$)` boundaries. Also, correctly escape regex literals (e.g., `.` or `?`) when building patterns dynamically from static strings using `str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")`.
+
+## 2024-10-26 - Optimize Shell Command Token Iteration
+**Learning:** In hot paths analyzing parsed arrays of tokens (like `tokenizeShellCommands`), chaining array methods (`.flat().map().some()`) and expanding structures to check for substring matches causes extreme numbers of intermediate allocations and string manipulations. In TS/JS this creates noticeable garbage collection pressure when processing large input buffers.
+**Action:** Replace `.map().some()` on strings with explicit single-pass `for` loops. Check exact string matches via `Set.has()` instead of executing regexes over the array, and avoid creating intermediate arrays (e.g., using `words.push()` inside a loop instead of `.map`). Extract paths using inline `.lastIndexOf()` and `.substring()` instead of `.split("/").at(-1)`.
