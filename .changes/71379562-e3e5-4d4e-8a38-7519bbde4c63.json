@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "packages": [
+    "coding-agent"
+  ],
+  "type": "None",
+  "reason": "Optimize string scanning overhead inside hot loops in the project instructions compiler."
+}
