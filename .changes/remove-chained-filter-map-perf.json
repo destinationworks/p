@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "packages": [
+    "coding-agent"
+  ],
+  "type": "None",
+  "reason": "Replaced expensive `.filter().map().join()` chains with explicit loops in render-utils and print-mode serialization loops to reduce memory allocations and improve string processing overhead in hot paths."
+}
