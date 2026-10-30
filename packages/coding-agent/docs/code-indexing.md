@@ -178,6 +178,27 @@ Common generated and dependency directories such as `.git`, `node_modules`, `dis
 
 The `semantic_search` tool checks the repository opt-in registry before accessing the index. When indexing is disabled or has not been approved, it returns `RAG_DISABLED` and directs the agent to exact search and file reads. Backend failures returned with an empty result are exposed as tool errors; a healthy ready index with no matching chunks is reported as a successful no-match result.
 
+## Menu bar and system tray
+
+The daemon starts a small status indicator: a menu-bar item on macOS (`p-indexing-tray`, built from `packages/coding-agent/src/tray/macos`) and a GTK/AppIndicator item on Linux desktops with a display (`indexing_tray.py`). Set `enableTray` to `false` in `code-rag.json` to disable it.
+
+The menu shows the service state, compute device, repositories, and these actions:
+
+| State | Service item | Other actions |
+|---|---|---|
+| Running | **Stop Indexing Service** | Restart, Reindex All Repositories, and per-repository Prioritize / Re-index are enabled |
+| Stopped | **Start Indexing Service** | Restart, Reindex All, and Prioritize are disabled; the status line reads "Stopped" even if `indexing-service-status.json` is stale |
+| Stopped, service not installed | **Start Indexing Service (not installed)**, disabled | Run `./reinstall.sh` to install it |
+| Stop, Start, or Restart in progress | "Stopping..." / "Starting..." / "Restarting...", disabled | All service actions are disabled until it finishes |
+
+Stopping frees the memory held by the daemon, its embedding server, and Qdrant. On macOS the tray runs `launchctl bootout gui/<uid>/com.dst.p.code-index` (not a kill, so `KeepAlive` does not respawn it) and starts again with `launchctl bootstrap gui/<uid> ~/Library/LaunchAgents/com.dst.p.code-index.plist`. On Linux it runs `systemctl --user stop|start com.dst.p.code-index.service`.
+
+A stopped service stays stopped until you choose **Start Indexing Service**, rerun `./reinstall.sh`, or log in again (the plist keeps `RunAtLoad`, and the systemd unit is enabled). While it is stopped, the footer shows the service as unavailable (see Footer status) and nothing is indexed.
+
+The macOS tray survives a Stop so it can offer Start: it ignores the `SIGTERM` the daemon sends its tray child during shutdown for the duration of the `bootout`. On Linux the tray is a child of the systemd unit, so systemd stops it together with the service; start the service again with `systemctl --user start com.dst.p.code-index.service`.
+
+The menu is built from in-memory state only. The tray reads its JSON files, probes `launchctl print` (or `systemctl --user is-active`), and checks the plist on background queues every two seconds, so opening the menu never waits on disk or a subprocess. State older than ten seconds is shown with "(refreshing...)".
+
 ## Local files and processes
 
 With the default agent directory, indexing state is stored under `~/.p/agent`:

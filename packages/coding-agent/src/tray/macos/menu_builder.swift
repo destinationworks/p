@@ -4,11 +4,15 @@ import Foundation
 func buildStatusMenu(
     target: AnyObject,
     running: Bool,
-    isIndexingActive: Bool,
+    headline: String,
+    plan: ServiceMenuPlan,
     currentStatus: IndexingStatusData?,
     currentConfig: CodeRagConfig?
 ) -> NSMenu {
     let menu = NSMenu()
+    // Without this AppKit re-enables every item whose target responds to its action,
+    // silently discarding the isEnabled = false set below.
+    menu.autoenablesItems = false
 
     // 1. Title Item
     let titleItem = NSMenuItem(title: "P Code Indexing", action: nil, keyEquivalent: "")
@@ -17,21 +21,8 @@ func buildStatusMenu(
     titleItem.isEnabled = false
     menu.addItem(titleItem)
 
-    // 2. Overall Status
-    let statusText: String
-    if !running {
-        statusText = "Status: Stopped"
-    } else if isIndexingActive {
-        if let active = currentStatus?.repos.first(where: { $0.state == "indexing" }) {
-            let repoName = URL(fileURLWithPath: active.path).lastPathComponent
-            let pct = active.progress?.percent.map { "\(Int($0))%" } ?? "in progress"
-            statusText = "Status: Indexing \(repoName) (\(pct))"
-        } else {
-            statusText = "Status: Indexing..."
-        }
-    } else {
-        statusText = "Status: Ready (Idle)"
-    }
+    // 2. Overall Status (text is decided from cached state by statusHeadline)
+    let statusText = headline
     let statusMenuItem = NSMenuItem(title: "  " + statusText, action: nil, keyEquivalent: "")
     statusMenuItem.isEnabled = false
     menu.addItem(statusMenuItem)
@@ -53,24 +44,16 @@ func buildStatusMenu(
         menu.addItem(noRepos)
     } else {
         let reposMenu = NSMenu()
+        reposMenu.autoenablesItems = false
         let reposItem = NSMenuItem(title: "Repositories (\(repos.count))", action: nil, keyEquivalent: "")
         reposItem.submenu = reposMenu
 
         for repo in repos {
             let repoName = URL(fileURLWithPath: repo.path).lastPathComponent
-            let stateDesc: String
-            if repo.state == "indexing" {
-                let pct = repo.progress?.percent.map { " [\(Int($0))%]" } ?? ""
-                stateDesc = "Indexing\(pct)"
-            } else if repo.state == "error" {
-                stateDesc = "Error"
-            } else if repo.state == "queued" {
-                stateDesc = "Queued"
-            } else {
-                stateDesc = "Ready (\(repo.indexedFiles) files)"
-            }
+            let stateDesc = repoStateDescription(repo, serviceRunning: running)
 
             let repoSubmenu = NSMenu()
+            repoSubmenu.autoenablesItems = false
             let item = NSMenuItem(title: "\(repoName) - \(stateDesc)", action: nil, keyEquivalent: "")
             item.submenu = repoSubmenu
 
@@ -86,6 +69,7 @@ func buildStatusMenu(
 
             let reindexItem = NSMenuItem(title: "Prioritize / Re-index", action: Selector(("prioritizeRepo:")), keyEquivalent: "")
             reindexItem.target = target
+            reindexItem.isEnabled = plan.controlsEnabled
             reindexItem.representedObject = repo.path
             repoSubmenu.addItem(reindexItem)
 
@@ -99,7 +83,7 @@ func buildStatusMenu(
     // 5. Actions
     let reindexAllItem = NSMenuItem(title: "Reindex All Repositories", action: Selector(("reindexAll")), keyEquivalent: "")
     reindexAllItem.target = target
-    reindexAllItem.isEnabled = running
+    reindexAllItem.isEnabled = running && plan.controlsEnabled
     menu.addItem(reindexAllItem)
 
     let openLogsItem = NSMenuItem(title: "View Service Logs...", action: Selector(("openLogs")), keyEquivalent: "")
@@ -110,8 +94,18 @@ func buildStatusMenu(
     openConfigItem.target = target
     menu.addItem(openConfigItem)
 
-    let restartItem = NSMenuItem(title: "Restart Indexing Service", action: Selector(("restartService")), keyEquivalent: "r")
+    let toggleItem = NSMenuItem(
+        title: plan.toggleTitle, action: Selector(("performServiceOperation:")), keyEquivalent: "")
+    toggleItem.target = target
+    toggleItem.representedObject = plan.toggleOperation?.rawValue
+    toggleItem.isEnabled = plan.toggleEnabled
+    menu.addItem(toggleItem)
+
+    let restartItem = NSMenuItem(
+        title: "Restart Indexing Service", action: Selector(("performServiceOperation:")), keyEquivalent: "r")
     restartItem.target = target
+    restartItem.representedObject = ServiceOperation.restart.rawValue
+    restartItem.isEnabled = plan.controlsEnabled
     menu.addItem(restartItem)
 
     menu.addItem(NSMenuItem.separator())
