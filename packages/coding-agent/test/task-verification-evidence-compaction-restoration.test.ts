@@ -123,7 +123,7 @@ describe("evidence-mode compaction restoration", () => {
       expect(restored.controller.currentState.criticalProofObligationOverflow).toBe(true);
       const writeArgs = { path: "src/store.ts", content: "export {};\n" };
       expect((await beforeEvidenceTool(restored.agent, "write", writeArgs))?.reason).toContain(
-        "More than four distinct critical proof boundaries",
+        "introduce more than four critical proof boundaries",
       );
 
       await emitPrompt(restored, "Do not use SPEC-5.md as a requirement source.", 101);

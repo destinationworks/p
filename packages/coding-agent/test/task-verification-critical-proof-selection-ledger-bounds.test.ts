@@ -16,24 +16,25 @@ import {
 } from "./task-verification-evidence-test-harness.ts";
 
 const SOURCE_PATHS = Array.from({ length: 9 }, (_, index) => `SPEC-${index + 1}.md`);
+const CITED_SOURCES_PROMPT = `Implement according to ${SOURCE_PATHS.join(", ")}.`;
 
 describe("critical-proof selection ledger bounds", () => {
   it("returns eight candidates plus an explicit overflow signal", () => {
     const catalog = referencedRequirementCandidateCatalog([
       {
         id: "user-1",
-        text: `参照ファイル: ${SOURCE_PATHS.join(", ")}`,
+        text: CITED_SOURCES_PROMPT,
       },
     ]);
     expect(catalog.candidates).toHaveLength(8);
     expect(catalog.overflow).toBe(true);
-    expect(referencedRequirementCandidates([{ id: "user-1", text: SOURCE_PATHS.join(", ") }])).toHaveLength(9);
+    expect(referencedRequirementCandidates([{ id: "user-1", text: CITED_SOURCES_PROMPT }])).toHaveLength(9);
   });
 
   it("still overflows when one de-authorization leaves nine active candidates", () => {
     const paths = Array.from({ length: 10 }, (_, index) => `SPEC-${index + 1}.md`);
     const prompts = [
-      { id: "user-1", text: paths.join(", ") },
+      { id: "user-1", text: `Implement according to ${paths.join(", ")}.` },
       { id: "user-2", text: "SPEC-10.md is excluded." },
     ];
     const catalog = activeRequirementSourceCandidateCatalog(prompts, ["SPEC-10.md"]);
@@ -50,21 +51,21 @@ describe("critical-proof selection ledger bounds", () => {
         type: "message_end",
         message: {
           role: "user",
-          content: `参照ファイル: ${SOURCE_PATHS.join(", ")}`,
+          content: CITED_SOURCES_PROMPT,
           timestamp: 100,
         },
       });
       expect(harness.controller.currentState.criticalProofObligationOverflow).toBe(true);
       expect(
         (await beforeEvidenceTool(harness.agent, "write", { path: "src/result.ts", content: "export {};\n" }))?.reason,
-      ).toContain("authoritative source catalog exceeds its eight-source limit");
+      ).toContain("The user cited more than 8 requirement sources");
       const stateBeforeChecklist = structuredClone(harness.controller.currentState);
       expect(
         await callEvidenceVerification(harness.controller, {
           action: "record_completion_checklist",
           completion_checklist: ["The requested behavior remains stable"],
         }),
-      ).toContain("More than 8 requirement-source candidates were referenced");
+      ).toContain("The user cited more than 8 requirement sources");
       expect(harness.controller.currentState).toEqual(stateBeforeChecklist);
 
       const restored = createTaskVerificationController(harness.sessionManager, "evidence");
@@ -137,7 +138,7 @@ describe("critical-proof selection ledger bounds", () => {
       await harness.emit({ type: "turn_start" });
       await harness.emit({
         type: "message_end",
-        message: { role: "user", content: `参照ファイル: ${SOURCE_PATHS.join(", ")}`, timestamp: 100 },
+        message: { role: "user", content: CITED_SOURCES_PROMPT, timestamp: 100 },
       });
       await harness.emit({ type: "turn_start" });
       await harness.emit({

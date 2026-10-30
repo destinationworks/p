@@ -9,9 +9,9 @@ import {
 import { exactFinalByteProofDomains } from "./evidence-critical-proof-source.ts";
 import type { RequirementSourceCandidate } from "./referenced-requirement-sources.ts";
 import {
+  activeRequirementSourceCandidates,
   MAX_REQUIREMENT_SOURCE_BYTES,
   normalizeRequirementSourcePath,
-  referencedRequirementCandidates,
 } from "./referenced-requirement-sources.ts";
 import {
   isAuthoritativeRequirementSourceCandidate,
@@ -43,7 +43,7 @@ export function recordCriticalProofObservation(
   const candidate = observedRequirementSourceCandidate(
     self.sessionManager.getCwd(),
     pathArgument(args) ?? "",
-    referencedRequirementCandidates(prompts),
+    activeRequirementSourceCandidates(prompts),
   );
   if (!candidate || taskOwnsPath(self, candidate.path)) return undefined;
   if ((self.state.criticalProofDeauthorizedSourcePaths ?? []).includes(candidate.path)) return undefined;
@@ -129,7 +129,7 @@ export function recordCriticalProofObservation(
       updatedAt: new Date().toISOString(),
     };
     self.persistState();
-    return "Critical proof discovery exceeded its four-boundary safety limit. Ask the user to narrow the authoritative source set.";
+    return "Critical proof discovery exceeded its four-boundary safety limit, so mutation is blocked until the source set is narrowed. record_task_verification status lists the exact narrowing steps.";
   }
   const obligations = [...retained, ...replacements];
   const selections = (self.state.criticalProofSourceSelections ?? []).map((selection) =>
