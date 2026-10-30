@@ -6,6 +6,7 @@ import {
 import { MAX_EVIDENCE_CRITICAL_PROOF_OBLIGATIONS } from "../evidence-critical-proof.ts";
 import {
   activeRequirementSourceCandidateCatalog,
+  activeRequirementSourceCandidates,
   MAX_REQUIREMENT_SOURCE_CANDIDATES,
   MAX_SELECTED_REQUIREMENT_SOURCES,
   normalizeRequirementSourcePath,
@@ -16,6 +17,8 @@ import {
   isAuthoritativeRequirementSourceCandidate,
   latestRequirementSourceDeauthorization,
 } from "../requirement-source-authority.ts";
+import { citedRequirementSourceOverflowMessage } from "../requirement-source-candidate-catalog.ts";
+import { citedRequirementSourcePaths } from "../requirement-source-citation-index.ts";
 import { emptyReadiness } from "../state-factories.ts";
 import type { TaskVerificationController } from "../taskverificationcontroller.ts";
 import type {
@@ -53,10 +56,21 @@ export function selectCriticalProofSources(
   );
   const catalog = activeRequirementSourceCandidateCatalog(prompts, acceptedDeauthorizations);
   if (catalog.overflow) {
-    return `More than ${MAX_REQUIREMENT_SOURCE_CANDIDATES} requirement-source candidates were referenced. Ask the user to narrow the authoritative specification set.`;
+    // Deauthorizations are capped at three per call, so keep them even though the set is still too large;
+    // otherwise a task that cited a dozen sources could never be narrowed.
+    persistPartialDeauthorization(self, deauthorized);
+    const referencedCandidates = activeRequirementSourceCandidates(prompts, acceptedDeauthorizations);
+    return citedRequirementSourceOverflowMessage(
+      catalog,
+      citedRequirementSourcePaths(prompts, referencedCandidates).size,
+    );
   }
   const candidates = catalog.candidates;
-  const unknown = normalized.filter((path) => !candidates.some((candidate) => candidate.path === path));
+  // The model may select any referenced path, including bare mentions beyond the bounded catalog.
+  const referenced = new Set(
+    activeRequirementSourceCandidates(prompts, acceptedDeauthorizations).map((candidate) => candidate.path),
+  );
+  const unknown = normalized.filter((path) => !referenced.has(path));
   if (unknown.length > 0) return `Authoritative source was not referenced by the user: ${unknown.join(", ")}.`;
   const samePromptDeauthorization = deauthorized.find((path) =>
     (self.state.criticalProofSourceSelections ?? []).some(
@@ -108,6 +122,9 @@ export function selectCriticalProofSources(
     }
     selections.push({ sourcePath: candidate.path, selectedAtPromptId: candidate.referencedByPromptIds.at(-1)! });
   }
+  if (selections.length > MAX_REQUIREMENT_SOURCE_CANDIDATES) {
+    return `Selected critical-proof sources would exceed the ${MAX_REQUIREMENT_SOURCE_CANDIDATES}-source ledger. Select fewer authoritative_source_paths.`;
+  }
   const recomputed = recomputeCriticalProofSelections(
     self.sessionManager.getCwd(),
     selections,
@@ -129,6 +146,19 @@ export function selectCriticalProofSources(
     return `Cannot select authoritative source ${failedSelection.sourcePath}: ${failedSelection.reason}`;
   }
   return overflow ? "Selected authoritative sources exceed the four-boundary critical-proof limit." : undefined;
+}
+
+function persistPartialDeauthorization(self: TaskVerificationController, deauthorized: readonly string[]): void {
+  const merged = [...new Set([...(self.state.criticalProofDeauthorizedSourcePaths ?? []), ...deauthorized])];
+  if (deauthorized.length === 0 || merged.length > MAX_REQUIREMENT_SOURCE_CANDIDATES) return;
+  self.state = {
+    ...self.state,
+    criticalProofDeauthorizedSourcePaths: merged,
+    criticalProofObligationOverflow: true,
+    readiness: emptyReadiness(),
+    updatedAt: new Date().toISOString(),
+  };
+  self.persistState();
 }
 
 function persistSelection(

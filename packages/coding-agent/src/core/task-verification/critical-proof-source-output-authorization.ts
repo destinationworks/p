@@ -1,7 +1,4 @@
-import {
-  normalizeRequirementSourcePath,
-  referencedRequirementCandidateCatalog,
-} from "./referenced-requirement-sources.ts";
+import { activeRequirementSourceCandidates, normalizeRequirementSourcePath } from "./referenced-requirement-sources.ts";
 
 const SOURCE_OUTPUT_MARKER_PREFIX = "[source-output:";
 
@@ -30,8 +27,9 @@ export function promptContainsSourceOutputAuthorization(promptText: string, sour
 }
 
 function textReferencesExactPath(text: string, sourcePath: string): boolean {
-  const catalog = referencedRequirementCandidateCatalog([{ id: "authorization", text }]);
-  return !catalog.overflow && catalog.candidates.some((candidate) => candidate.path === sourcePath);
+  return activeRequirementSourceCandidates([{ id: "authorization", text }]).some(
+    (candidate) => candidate.path === sourcePath,
+  );
 }
 
 function standaloneSourceOutputMarkers(text: string): string[] | undefined {

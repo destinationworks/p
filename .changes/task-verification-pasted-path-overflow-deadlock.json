@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "packages": ["coding-agent"],
+  "type": "Fixed",
+  "summary": "Stop STRICT task verification from blocking every tool after a prompt merely mentions more than eight document paths, such as a pasted log or startup screen; only explicitly cited requirement sources count toward the limit, and common read-only shell discovery stays available."
+}

@@ -202,6 +202,9 @@ else
     node scripts/prepare-indexing-service-reinstall.js
 fi
 
+# Keep the service logs bounded: archive any log over 50 MB (Brotli) and empty it in place.
+node scripts/archive-indexing-service-logs.js || echo "Warning: indexing service log archiving failed; continuing."
+
 # Install or update the persistent code-indexing service (launchd/systemd)
 P_INDEXING_REINSTALL_RUN_ID="$INDEXING_REINSTALL_RUN_ID" \
 P_INDEXING_REINSTALL_EXPECTED_REUSE="$INDEXING_REUSE_DECISION" \

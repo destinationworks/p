@@ -12,36 +12,15 @@ import {
   TASK_KINDS,
   WRITE_REDIRECT_PATTERN,
 } from "./constants.ts";
-import { containsGitPublishCommand, tokenizeShellCommands } from "./git-command-classification.ts";
+import { containsGitPublishCommand } from "./git-command-classification.ts";
+import {
+  isConfidentlyReadOnlyShellCommand,
+  isReadOnlyDiscoveryShellCommand,
+} from "./read-only-shell-command-classification.ts";
 import { isCheckedSourcePath, physicalLineCount } from "./source-file-classification.ts";
 import type { BaselineMethod, FinalMethod, TaskKind } from "./types.ts";
 
 export { inferTaskKind } from "./task-kind-inference.ts";
-
-const CONFIDENTLY_READ_ONLY_SHELL_COMMANDS = new Set([
-  "cat",
-  "cmp",
-  "df",
-  "diff",
-  "echo",
-  "file",
-  "grep",
-  "head",
-  "ioreg",
-  "ls",
-  "pwd",
-  "rg",
-  "shasum",
-  "stat",
-  "sw_vers",
-  "system_profiler",
-  "tail",
-  "test",
-  "wc",
-  "which",
-]);
-const CONFIDENTLY_READ_ONLY_GIT_SUBCOMMANDS = new Set(["diff", "log", "show", "status"]);
-const SAFE_NULL_REDIRECT_PATTERN = /(?:^|\s)(?:[012]?>>|[012]?>)\s*\/dev\/null(?=\s|$)/gu;
 
 export function findOversizedSourceFiles(
   cwd: string,
@@ -202,49 +181,12 @@ export function isPotentialMutationTool(toolName: string, args: unknown): boolea
 }
 
 export function isConfidentlyReadOnlyShellTool(toolName: string, args: unknown): boolean {
-  if (!isShellTool(toolName)) return false;
-  const command = shellCommand(args);
-  const commandWithoutNullRedirects = command.replace(SAFE_NULL_REDIRECT_PATTERN, " ");
-  if (!command || /[\n\r`$()<>]/u.test(commandWithoutNullRedirects)) return false;
-  const commands = tokenizeShellCommands(commandWithoutNullRedirects);
-  if (commands.length === 0) return false;
-  return commands.every((words) => {
-    const executable = words[0];
-    if (!executable || executable.includes("/") || executable.includes("\\")) return false;
-    const name = executable.toLocaleLowerCase("en-US");
-    if (
-      name === "find" &&
-      words.some((word) => /^-(?:delete|exec|execdir|fls|fprint|fprint0|fprintf|ok|okdir)$/u.test(word))
-    ) {
-      return false;
-    }
-    if (name === "rg" && words.some((word) => word === "--pre" || word.startsWith("--pre="))) return false;
-    if (
-      name === "file" &&
-      words.slice(1).some((word) => word === "--compile" || (/^-[^-]*C/u.test(word) && word !== "-"))
-    ) {
-      return false;
-    }
-    if (name === "diff" && words.slice(1).some((word) => word === "--output" || word.startsWith("--output="))) {
-      return false;
-    }
-    if (name === "diskutil") {
-      const subcommand = words[1]?.toLocaleLowerCase("en-US");
-      return subcommand === "list" || subcommand === "info";
-    }
-    if (name === "mount") return words.length === 1;
-    if (name === "git") {
-      const subcommand = words[1]?.toLocaleLowerCase("en-US");
-      const unsafeOption = words
-        .slice(2)
-        .some(
-          (word) =>
-            word === "--output" || word.startsWith("--output=") || word === "--ext-diff" || word === "--textconv",
-        );
-      return subcommand !== undefined && CONFIDENTLY_READ_ONLY_GIT_SUBCOMMANDS.has(subcommand) && !unsafeOption;
-    }
-    return CONFIDENTLY_READ_ONLY_SHELL_COMMANDS.has(name);
-  });
+  return isShellTool(toolName) && isConfidentlyReadOnlyShellCommand(shellCommand(args));
+}
+
+/** Wider than isConfidentlyReadOnlyShellTool; for the verification gate, never for trust decisions. */
+export function isReadOnlyDiscoveryShellTool(toolName: string, args: unknown): boolean {
+  return isShellTool(toolName) && isReadOnlyDiscoveryShellCommand(shellCommand(args));
 }
 
 export function pathArgument(args: unknown): string | undefined {
