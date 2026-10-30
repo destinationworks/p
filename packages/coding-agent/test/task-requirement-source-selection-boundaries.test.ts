@@ -51,7 +51,7 @@ describe("requirement-source selection boundaries", () => {
         [],
         [],
       ),
-    ).toContain(`More than ${MAX_REQUIREMENT_SOURCE_CANDIDATES} requirement-source candidates`);
+    ).toContain(`The user cited more than ${MAX_REQUIREMENT_SOURCE_CANDIDATES} requirement sources`);
 
     const selectedPaths = Array.from(
       { length: MAX_SELECTED_REQUIREMENT_SOURCES + 1 },
