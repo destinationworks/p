@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "packages": ["coding-agent"],
+  "type": "Fixed",
+  "summary": "Skills and prompt templates whose flat frontmatter has an unquoted plain value containing ': ' (for example a description) now load instead of being dropped with a YAML error."
+}
