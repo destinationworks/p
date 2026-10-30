@@ -51,6 +51,8 @@ function collectIndexingFiles(projectRoot: string): string[] {
     "indexing-python-discovery.js",
     "indexing-python-environment.js",
     "indexing-qdrant-assets.js",
+    "archive-indexing-service-logs.js",
+    "indexing-service-log-archive.js",
     "indexing-service-reuse.js",
     "indexing-service-health.js",
     "indexing-service-node-executable.js",
