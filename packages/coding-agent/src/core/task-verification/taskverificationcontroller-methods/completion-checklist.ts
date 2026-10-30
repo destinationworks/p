@@ -7,7 +7,16 @@ import {
 } from "../critical-proof-source-output-revalidation.ts";
 import { evidenceCriticalProofRequirement, formatEvidenceCriticalProofGuidance } from "../evidence-critical-proof.ts";
 import { criticalProofDiscoveryFailureMessage } from "../evidence-critical-proof-observation.ts";
-import { normalizeRequirementSourcePath } from "../referenced-requirement-sources.ts";
+import {
+  activeRequirementSourceCandidateCatalog,
+  activeRequirementSourceCandidates,
+  normalizeRequirementSourcePath,
+} from "../referenced-requirement-sources.ts";
+import {
+  citedRequirementSourceOverflowMessage,
+  criticalProofBoundaryOverflowMessage,
+} from "../requirement-source-candidate-catalog.ts";
+import { citedRequirementSourcePaths } from "../requirement-source-citation-index.ts";
 import { emptyReadiness } from "../state-factories.ts";
 import type { TaskVerificationController } from "../taskverificationcontroller.ts";
 import type {
@@ -65,7 +74,7 @@ export function recordCompletionChecklist(
   if (recoveringSourceOutput) self.restoreError = frozenSourceOutputRestoreError(self);
   const discoveryFailure = criticalProofDiscoveryFailureMessage(self);
   if (discoveryFailure) return self.rejected(discoveryFailure);
-  if (self.state.criticalProofObligationOverflow) return self.rejected(criticalProofOverflowMessage());
+  if (self.state.criticalProofObligationOverflow) return self.rejected(criticalProofOverflowMessage(self));
   const missingObligation = (self.state.criticalProofObligations ?? []).find(
     (obligation) => !checklistCoversCriticalProof(normalized, obligation),
   );
@@ -187,7 +196,7 @@ export function formatCompletionChecklist(self: TaskVerificationController): str
 function currentChecklistError(self: TaskVerificationController): string | undefined {
   const discoveryFailure = criticalProofDiscoveryFailureMessage(self);
   if (discoveryFailure) return discoveryFailure;
-  if (self.state.criticalProofObligationOverflow) return criticalProofOverflowMessage();
+  if (self.state.criticalProofObligationOverflow) return criticalProofOverflowMessage(self);
   const checklist = self.state.completionChecklist;
   if (!checklist || !sameStrings(checklist.sourcePromptIds, currentSourcePromptIds(self))) {
     return 'record one completion checklist after discovery with record_task_verification action "record_completion_checklist" before the first matching mutation';
@@ -213,6 +222,16 @@ function missingCriticalProofMessage(obligation: TaskVerificationCriticalProofOb
   return `The authoritative source ${obligation.sourcePath} introduces a bounded critical boundary. Keep the existing checklist and append: ${criterion}.`;
 }
 
-function criticalProofOverflowMessage(): string {
-  return "More than four distinct critical proof boundaries were discovered, or the authoritative source catalog exceeds its eight-source limit. Ask the user to narrow the authoritative source set before mutation.";
+function criticalProofOverflowMessage(self: TaskVerificationController): string {
+  const catalog = activeRequirementSourceCandidateCatalog(
+    self.state.taskPrompts ?? [],
+    self.state.criticalProofDeauthorizedSourcePaths,
+  );
+  if (catalog.overflow) {
+    const prompts = self.state.taskPrompts ?? [];
+    const referenced = activeRequirementSourceCandidates(prompts, self.state.criticalProofDeauthorizedSourcePaths);
+    return citedRequirementSourceOverflowMessage(catalog, citedRequirementSourcePaths(prompts, referenced).size);
+  }
+  const selectedPaths = (self.state.criticalProofSourceSelections ?? []).map((selection) => selection.sourcePath);
+  return criticalProofBoundaryOverflowMessage(selectedPaths);
 }
