@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "packages": ["coding-agent"],
+  "type": "None",
+  "reason": "CI-only: the self-hosted build-check-test and release validate jobs verify ripgrep with a non-privileged check instead of sudo apt-get."
+}

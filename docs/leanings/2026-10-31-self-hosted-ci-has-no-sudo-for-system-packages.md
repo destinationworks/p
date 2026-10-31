@@ -1,0 +1,27 @@
+# 2026-10-31 — Self-hosted CI cannot install system packages with sudo
+
+- **Status:** Resolved
+- **Task/context:** Every recent pull request failed the `build-check-test` job in `.github/workflows/ci.yml` on the self-hosted runner (`[self-hosted, Linux, X64, mini-pc, p]`). The release `validate` job in `.github/workflows/build-binaries.yml` ran the same step on the same runner.
+- **Unexpected observation or failure:** The "Install system dependencies" step failed before any repository code ran: `sudo: package 'libcairo2-dev' is not pre-installed and privilege escalation is disabled for runner user`. The step ran `sudo apt-get update`, `sudo apt-get install -y libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev fd-find ripgrep`, then `sudo ln -sf "$(which fdfind)" /usr/local/bin/fd`.
+- **Evidence:**
+  - The runner user's `sudo` is a restricted shim that refuses installs; apt packages cannot be added from a job.
+  - The cairo/pango/jpeg/gif/rsvg headers exist only to compile the npm `canvas` native module. CI installs with `npm ci --ignore-scripts`, so `canvas` is never compiled and the headers were never used.
+  - `canvas` is not unused: `packages/ai/scripts/generate-test-image.ts` imports it to regenerate the committed fixture `packages/ai/test/data/red-circle.png`, which five `packages/ai` tests read. A search limited to `src`, `test` and root `scripts` missed it.
+  - `fd` is not needed on PATH: `getToolPath` in `packages/coding-agent/src/utils/tools-manager/download-management.ts` already accepts `fd` or `fdfind`, and no unit test spawns it.
+  - `ripgrep` is a real test dependency: with `rg` absent from PATH and `P_OFFLINE=1`, `packages/coding-agent/test/tools-find-grep-ops.test.ts` ("throws when isDirectory fails") fails with `ripgrep (rg) is not available and could not be downloaded`, because the grep tool resolves `rg` before it validates the search directory. Online with `rg` absent, the same test passes only by downloading `rg` from GitHub into the per-file isolated agent directory. `P_OFFLINE=1` also breaks `tools-manager.test.ts` ("reuses a tool installed by the process that held the lock") even with `rg` present, so that failure is an artifact of the flag, not of a missing tool.
+- **Approaches tried:**
+  - **Attempt:** Keep the sudo step and ask for sudo on the runner.
+    - **Outcome:** Did not work.
+    - **Why:** Privilege escalation is disabled on purpose for the runner user.
+  - **Attempt:** Remove the `canvas` devDependency together with the step.
+    - **Outcome:** Rejected.
+    - **Why:** It would break the fixture generator script and is unnecessary: removing the sudo step does not depend on removing `canvas`.
+  - **Attempt:** Replace the step with a non-privileged `command -v rg` prerequisite check.
+    - **Outcome:** Worked.
+    - **Why:** It fails early with a clear message when the runner lacks ripgrep, and it needs no privilege.
+- **Root cause:** A workflow step assumed passwordless `sudo apt-get` on the runner, and carried native build headers for a module that `--ignore-scripts` never builds.
+- **Resolution:** Both self-hosted jobs now run `Verify runner prerequisites` (`command -v rg`) instead of the apt/ln step. `AGENTS.md` records the no-sudo rule for self-hosted jobs. The GitHub-hosted `publish-npm` job in `build-binaries.yml` keeps its sudo step because hosted runners provide passwordless `sudo`.
+- **Verification:** See the pull request for the `build-check-test` run on the exact head revision. Locally, the `tools-find-grep-ops` and `tools-manager` tests, `scripts/release-workflow.test.js` and `scripts/workflow-action-pins.test.js` were run with the change.
+- **Prevention/follow-up:** Runner administrator must keep `ripgrep` installed so tests do not depend on an unauthenticated GitHub download. Making the grep tool test hermetic (validate the directory before resolving `rg`, or stub `ensureTool`) would remove the dependency; it was left out of this CI-only change.
+- **Reusable learning:** On the self-hosted runner never call `sudo`/`apt-get`; assert required tools with `command -v`. Before removing a dependency as unused, search the whole repository (including package `scripts/` folders), not just `src` and `test`.
+- **References:** `.github/workflows/ci.yml`, `.github/workflows/build-binaries.yml`, `packages/ai/scripts/generate-test-image.ts`, `packages/coding-agent/src/utils/tools-manager/download-management.ts`, `packages/coding-agent/test/tools-find-grep-ops.test.ts`.

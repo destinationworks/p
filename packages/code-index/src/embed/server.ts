@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { connect } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -16,6 +17,8 @@ const DEFAULT_SERVER_OPTIONS: EmbeddingServerManagerOptions = {
   startupTimeoutMs: 120_000,
 };
 const SERVER_STOP_TIMEOUT_MS = 5_000;
+const PORT_PROBE_TIMEOUT_MS = 1_000;
+const READINESS_POLL_INTERVAL_MS = 1_000;
 
 /**
  * Manages the lifecycle of the Python embedding server subprocess.
@@ -70,6 +73,16 @@ export class EmbeddingServerManager {
     const alreadyRunning = await this.checkHealth();
     if (alreadyRunning) {
       this.options.onLog?.("debug", `Embedding server already running on port ${this.port}`);
+      return false;
+    }
+    // A slow /health answer does not mean the server is gone. Spawning while a server is busy, still loading,
+    // or our own child is alive only creates a duplicate that loads the model and cannot bind the port.
+    if (this.childIsAlive() || (await this.portHasListener())) {
+      this.options.onLog?.(
+        "debug",
+        `Embedding server on port ${this.port} is busy or still starting; waiting for readiness`,
+      );
+      await this.waitForReadiness(signal);
       return false;
     }
 
@@ -219,13 +232,49 @@ export class EmbeddingServerManager {
     return false;
   }
 
+  private childIsAlive(): boolean {
+    return this.child !== null && this.child.exitCode === null && this.child.signalCode === null;
+  }
+
+  /** Whether anything accepts TCP connections on the port; only a refused connection means it is free. */
+  private portHasListener(): Promise<boolean> {
+    return new Promise((resolve) => {
+      const socket = connect({ host: "127.0.0.1", port: this.port });
+      const finish = (listening: boolean) => {
+        socket.destroy();
+        resolve(listening);
+      };
+      socket.setTimeout(PORT_PROBE_TIMEOUT_MS, () => finish(true));
+      socket.once("connect", () => finish(true));
+      socket.once("error", (error: NodeJS.ErrnoException) => finish(error.code !== "ECONNREFUSED"));
+    });
+  }
+
+  private async waitForReadiness(signal?: AbortSignal): Promise<void> {
+    const deadline = Date.now() + this.options.startupTimeoutMs;
+    while (Date.now() < deadline) {
+      if (signal?.aborted) throw signal.reason ?? new Error("Embedding server startup cancelled");
+      // A busy server answers /health late, so a listening port gets the remaining budget, not the 2 s probe.
+      if (await this.checkHealth(Math.max(1, deadline - Date.now()), signal)) return;
+      if (!this.childIsAlive() && !(await this.portHasListener())) {
+        throw new Error(`Embedding server on port ${this.port} stopped before it became ready`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, READINESS_POLL_INTERVAL_MS));
+    }
+    if (this.childIsAlive()) this.kill();
+    throw new Error(
+      `Embedding server port ${this.port} is occupied but did not become ready within ${this.options.startupTimeoutMs}ms`,
+    );
+  }
+
   /**
    * Check if the server is healthy and ready.
    */
-  private async checkHealth(): Promise<boolean> {
+  private async checkHealth(timeoutMs = 2_000, signal?: AbortSignal): Promise<boolean> {
     try {
+      const timeout = AbortSignal.timeout(timeoutMs);
       const resp = await fetch(`http://127.0.0.1:${this.port}/health`, {
-        signal: AbortSignal.timeout(2000),
+        signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
       });
       if (!resp.ok) return false;
       const body = (await resp.json()) as Record<string, string>;

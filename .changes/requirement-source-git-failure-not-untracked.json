@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "packages": ["coding-agent"],
+  "type": "Fixed",
+  "summary": "Report the real git error when task verification cannot check whether a requirement source is tracked (no repository, sandboxed or missing git), instead of wrongly saying the file must be Git-tracked, and stop a glob-like untracked file name from passing as tracked."
+}

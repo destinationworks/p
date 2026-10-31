@@ -17,7 +17,7 @@ test("documented certified arguments derive a deadline covering every cell and p
   const options = parseRunnerArgs(documentedArgs);
   const taskBudget = benchmarkTasks.reduce((total, task) => total + task.timeoutSeconds, 0);
   const taskSeconds = taskBudget * options.agents.length * options.runs;
-  const preflightSeconds = 60 * options.agents.length;
+  const preflightSeconds = 300 + 60 * (options.agents.length - 1);
   const kiloStartupSeconds = options.kiloStartupTimeoutSeconds;
   const orchestrationSeconds = 300 + 30 * options.agents.length * options.runs * benchmarkTasks.length;
   assert.equal(options.maxRuntimeSeconds, taskSeconds + preflightSeconds + kiloStartupSeconds + orchestrationSeconds);
@@ -34,7 +34,10 @@ test("certified deadline scales minimum task timeouts, runs, and Kilo startup in
     "123",
   ]);
   const cells = options.agents.length * options.runs * benchmarkTasks.length;
-  assert.equal(options.maxRuntimeSeconds, 4000 * cells + 60 * options.agents.length + 123 + 300 + 30 * cells);
+  assert.equal(
+    options.maxRuntimeSeconds,
+    4000 * cells + 300 + 60 * (options.agents.length - 1) + 123 + 300 + 30 * cells,
+  );
 });
 
 test("certified mode rejects an explicitly inadequate global deadline", () => {

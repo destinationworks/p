@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "packages": ["coding-agent"],
+  "type": "None",
+  "reason": "Restore certified benchmark access to tracked requirement files through an exact Apple Git executable grant without changing shipped agent behavior."
+}

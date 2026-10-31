@@ -1,7 +1,9 @@
 import type { RunnerOptions } from "./runner-options.ts";
 import { canonicalTaskTimeoutSeconds } from "./task-definition.ts";
 
-const certifiedPreflightSecondsPerAgent = 60;
+export function certifiedPreflightTimeoutSeconds(agent: string): number {
+  return agent === "p" ? 300 : 60;
+}
 const certifiedSetupSeconds = 300;
 const certifiedOrchestrationSecondsPerCell = 30;
 
@@ -14,7 +16,7 @@ export function certifiedMinimumRuntimeSeconds(
   );
   const taskSeconds = perAgentRun * options.agents.length * options.runs;
   const cellCount = Object.keys(canonicalTaskTimeoutSeconds).length * options.agents.length * options.runs;
-  const preflightSeconds = certifiedPreflightSecondsPerAgent * options.agents.length;
+  const preflightSeconds = options.agents.reduce((total, agent) => total + certifiedPreflightTimeoutSeconds(agent), 0);
   const startupSeconds = options.agents.includes("kilo") ? options.kiloStartupTimeoutSeconds : 0;
   return (
     taskSeconds +

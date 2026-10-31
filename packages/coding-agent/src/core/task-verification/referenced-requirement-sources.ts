@@ -5,6 +5,12 @@ import {
   latestRequirementSourceDeauthorization,
   requirementSourceDeauthorizationIsCurrent,
 } from "./requirement-source-authority.ts";
+import {
+  boundedRequirementSourceCandidateCatalog,
+  citedRequirementSourceOverflowMessage,
+  type RequirementSourceCandidate,
+  type RequirementSourceCandidateCatalog,
+} from "./requirement-source-candidate-catalog.ts";
 import { inspectRequirementSourceFile } from "./requirement-source-file.ts";
 import type {
   IgnoredTaskVerificationRequirementSource,
@@ -12,7 +18,11 @@ import type {
   TaskVerificationSourcePrompt,
 } from "./types.ts";
 
-export const MAX_REQUIREMENT_SOURCE_CANDIDATES = 8;
+export {
+  MAX_REQUIREMENT_SOURCE_CANDIDATES,
+  type RequirementSourceCandidate,
+  type RequirementSourceCandidateCatalog,
+} from "./requirement-source-candidate-catalog.ts";
 export const MAX_SELECTED_REQUIREMENT_SOURCES = 3;
 export const MAX_REQUIREMENT_SOURCE_BYTES = 12_288;
 export const MAX_REQUIREMENT_SOURCE_TOTAL_BYTES = 24_576;
@@ -21,17 +31,6 @@ export const MAX_REQUIREMENT_DEFINITION_PROMPT_BYTES = 32_768;
 const MAX_REQUIREMENT_SOURCE_PATH_BYTES = 240;
 const DOCUMENT_PATH_PATTERN = /(?:\.\/?|[\p{L}\p{N}_-])[\p{L}\p{N}_./-]*\.(?:adoc|md|mdx|rst|txt)\b/giu;
 const TOKEN_BOUNDARY_PATTERN = /[\s`'"()[\]{}<>]/u;
-
-export interface RequirementSourceCandidate {
-  path: string;
-  referencedByPromptIds: string[];
-}
-
-export interface RequirementSourceCandidateCatalog {
-  candidates: RequirementSourceCandidate[];
-  overflow: boolean;
-  overflowCandidate?: RequirementSourceCandidate;
-}
 
 export interface IgnoredRequirementSourceCandidate {
   path: string;
@@ -64,16 +63,26 @@ export function referencedRequirementCandidates(
 export function referencedRequirementCandidateCatalog(
   prompts: readonly TaskVerificationSourcePrompt[],
 ): RequirementSourceCandidateCatalog {
-  return boundedCandidateCatalog(extractRequirementSourceCandidates(prompts));
+  return boundedRequirementSourceCandidateCatalog(prompts, extractRequirementSourceCandidates(prompts));
 }
 
 export function activeRequirementSourceCandidateCatalog(
   prompts: readonly TaskVerificationSourcePrompt[],
   acceptedDeauthorizedPaths: readonly string[] = [],
 ): RequirementSourceCandidateCatalog {
+  return boundedRequirementSourceCandidateCatalog(
+    prompts,
+    activeRequirementSourceCandidates(prompts, acceptedDeauthorizedPaths),
+  );
+}
+
+/** Every path the user referenced, including bare mentions beyond the bounded catalog. */
+export function activeRequirementSourceCandidates(
+  prompts: readonly TaskVerificationSourcePrompt[],
+  acceptedDeauthorizedPaths: readonly string[] = [],
+): RequirementSourceCandidate[] {
   const accepted = new Set(acceptedDeauthorizedPaths);
-  const candidates = extractRequirementSourceCandidates(prompts).filter((candidate) => !accepted.has(candidate.path));
-  return boundedCandidateCatalog(candidates);
+  return extractRequirementSourceCandidates(prompts).filter((candidate) => !accepted.has(candidate.path));
 }
 
 export function requirementSourcePathReferencedByPrompt(prompt: TaskVerificationSourcePrompt, path: string): boolean {
@@ -89,9 +98,7 @@ export function prepareReferencedRequirementSources(
   protectedPaths: readonly string[] = [],
 ): PreparedRequirementSourceSelection | string {
   const catalog = referencedRequirementCandidateCatalog(prompts);
-  if (catalog.overflow) {
-    return `More than ${MAX_REQUIREMENT_SOURCE_CANDIDATES} requirement-source candidates were referenced. Ask the user to narrow the authoritative specification set.`;
-  }
+  if (catalog.overflow) return citedRequirementSourceOverflowMessage(catalog, undefined, "audit");
   const candidates = catalog.candidates;
   const selectionError = validateSelection(candidates, prompts, selectedPaths, ignoredPaths, protectedPaths);
   if (selectionError) return selectionError;
@@ -247,7 +254,9 @@ function isRemoteOrAbsoluteReference(text: string, matchIndex: number): boolean 
   let end = matchIndex;
   while (end < text.length && !TOKEN_BOUNDARY_PATTERN.test(text[end]!)) end += 1;
   const token = text.slice(start, end);
-  return /:\/\//u.test(token) || token.startsWith("/") || /^[A-Za-z][A-Za-z0-9+.-]*:/u.test(token);
+  return (
+    /:\/\//u.test(token) || token.startsWith("/") || token.startsWith("~") || /^[A-Za-z][A-Za-z0-9+.-]*:/u.test(token)
+  );
 }
 
 function extractRequirementSourceCandidates(
@@ -265,16 +274,6 @@ function extractRequirementSourceCandidates(
     }
   }
   return [...candidates].map(([path, referencedByPromptIds]) => ({ path, referencedByPromptIds }));
-}
-
-function boundedCandidateCatalog(candidates: RequirementSourceCandidate[]): RequirementSourceCandidateCatalog {
-  return {
-    candidates: candidates.slice(0, MAX_REQUIREMENT_SOURCE_CANDIDATES),
-    overflow: candidates.length > MAX_REQUIREMENT_SOURCE_CANDIDATES,
-    ...(candidates[MAX_REQUIREMENT_SOURCE_CANDIDATES]
-      ? { overflowCandidate: candidates[MAX_REQUIREMENT_SOURCE_CANDIDATES] }
-      : {}),
-  };
 }
 
 function hashJson(value: unknown): string {

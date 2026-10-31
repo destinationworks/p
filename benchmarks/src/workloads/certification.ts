@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { CertifiedProxyEvidence } from "../harness/certified-egress-proxy.ts";
 import { assertCertifiedOutputWritePath } from "../harness/certified-output-integrity.ts";
 import type { BenchmarkEvaluationFreeze } from "../harness/evaluation-freeze.ts";
 import {
@@ -8,6 +9,7 @@ import {
   recheckCertifiedHarness,
 } from "./certification-binding.ts";
 import { evaluateInstructionParityReceipts } from "./certification-preflight.ts";
+import { validateCertifiedProxyEvidence } from "./certification-proxy-evidence.ts";
 import { validateCertifiedBenchmarkRow } from "./certification-row-schema.ts";
 import type { RunnerOptions } from "./runner-options.ts";
 import { benchmarkTasks } from "./task-registry.ts";
@@ -57,6 +59,7 @@ export interface BenchmarkRowLike {
   timedOut?: boolean;
   error?: string;
   nudges?: number;
+  proxyEvidence?: CertifiedProxyEvidence;
   metrics?: {
     usage: {
       input: number;
@@ -146,20 +149,27 @@ export function evaluateCertification(
     }
 
     const responseModel = row.metrics?.responseModel;
-    if (typeof responseModel !== "string" || !responseModel.trim()) {
+    failures.push(...validateCertifiedProxyEvidence(row.proxyEvidence, label, expectedModel));
+    const responseModels = row.metrics?.responseModels;
+    const kiloWireOnly =
+      row.agent === "kilo" &&
+      responseModel === undefined &&
+      (responseModels === undefined || responseModels.length === 0);
+    if (!kiloWireOnly && (typeof responseModel !== "string" || !responseModel.trim())) {
       failures.push(`missing responseModel runtime evidence for ${label}`);
-    } else if (expectedModel && responseModel !== expectedModel) {
+    } else if (!kiloWireOnly && expectedModel && responseModel !== expectedModel) {
       failures.push(`responseModel mismatch for ${label}: expected ${expectedModel}, got ${responseModel}`);
     }
-    const responseModels = row.metrics?.responseModels;
-    if (!Array.isArray(responseModels) || responseModels.length === 0) {
-      failures.push(`missing observed responseModels runtime evidence for ${label}`);
-    } else {
-      for (const observedModel of responseModels) {
-        if (expectedModel && observedModel !== expectedModel) {
-          failures.push(
-            `observed responseModel mismatch for ${label}: expected ${expectedModel}, got ${observedModel}`,
-          );
+    if (!kiloWireOnly) {
+      if (!Array.isArray(responseModels) || responseModels.length === 0) {
+        failures.push(`missing observed responseModels runtime evidence for ${label}`);
+      } else {
+        for (const observedModel of responseModels) {
+          if (expectedModel && observedModel !== expectedModel) {
+            failures.push(
+              `observed responseModel mismatch for ${label}: expected ${expectedModel}, got ${observedModel}`,
+            );
+          }
         }
       }
     }

@@ -1,8 +1,9 @@
-import { existsSync } from "node:fs";
+import { existsSync, lstatSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { augmentBenchmarkPath } from "../agents/environment.ts";
 import { createSandboxedBenchmarkCommand } from "../harness/benchmark-isolation.ts";
+import { certifiedCandidateEnvironment } from "../harness/certified-candidate-environment.ts";
 import { sanitizeBenchmarkGitEnvironment } from "../harness/workspace-repository.ts";
 import { configureProjectInstructionProbe } from "../project-instructions/evidence.ts";
 import { type AgentId, type RunnerOptions, repoRoot } from "./runner-options.ts";
@@ -22,9 +23,31 @@ function required(value: string | undefined, option: string): string {
   return value;
 }
 
-function kiloEnvironment(configDir: string): NodeJS.ProcessEnv {
-  return {
-    ...sanitizeBenchmarkGitEnvironment(),
+function assertCertifiedExtraCa(path: string): void {
+  const canonical = join(homedir(), ".p", "agent", "ca.pem");
+  if (path !== canonical) throw new Error("Certified extra CA must use the canonical agent CA file");
+  try {
+    const stat = lstatSync(path);
+    if (stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1) return;
+  } catch {
+    // Missing or unreadable CA files must not become candidate read grants.
+  }
+  throw new Error("Certified extra CA must be a regular, unlinked file");
+}
+
+function applyExtraCa(env: NodeJS.ProcessEnv, certified: boolean): void {
+  delete env.NODE_TLS_REJECT_UNAUTHORIZED;
+  if (certified) delete env.NODE_EXTRA_CA_CERTS;
+  const caPath = join(homedir(), ".p", "agent", "ca.pem");
+  if (existsSync(caPath)) {
+    if (certified) assertCertifiedExtraCa(caPath);
+    env.NODE_EXTRA_CA_CERTS = caPath;
+  }
+}
+
+function kiloEnvironment(configDir: string, certified = false, runtime?: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    ...(certified ? certifiedCandidateEnvironment(configDir, runtime) : sanitizeBenchmarkGitEnvironment()),
     HOME: configDir,
     NO_COLOR: "1",
     XDG_CACHE_HOME: join(configDir, "cache"),
@@ -32,6 +55,8 @@ function kiloEnvironment(configDir: string): NodeJS.ProcessEnv {
     XDG_DATA_HOME: join(configDir, "data"),
     XDG_STATE_HOME: join(configDir, "state"),
   };
+  if (certified) applyExtraCa(env, true);
+  return env;
 }
 
 export function commandForAgent(
@@ -43,6 +68,9 @@ export function commandForAgent(
   isContinue = false,
   promptOverride?: string,
 ): AgentCommand {
+  if (options.certified && agent !== "p" && agent !== "pi" && agent !== "kilo") {
+    throw new Error("Certified mode does not permit AGY or Codex commands");
+  }
   const prompt = promptOverride ?? task.prompt;
   if (agent === "agy") {
     const args = [
@@ -66,11 +94,17 @@ export function commandForAgent(
   }
   if (agent === "kilo") {
     const args = ["run", "--model", required(options.kiloModel, "--kilo-model"), "--format", "json", "--pure"];
+    args.push("--title", "P benchmark");
     if (!task.isProbe) args.push("--auto");
     args.push("--dir", workspace);
     if (isContinue) args.push("--continue");
     args.push(prompt);
-    return { executable: options.kiloExecutable ?? "kilo", args, env: kiloEnvironment(configDir), cwd: workspace };
+    return {
+      executable: options.kiloExecutable ?? "kilo",
+      args,
+      env: kiloEnvironment(configDir, options.certified, options.candidateRuntimePath),
+      cwd: workspace,
+    };
   }
   if (agent === "codex") {
     return {
@@ -110,8 +144,9 @@ export function commandForAgent(
     commonArgs.push("--no-context-files");
   }
   if (isContinue) commonArgs.push("--continue");
-  const env: NodeJS.ProcessEnv = sanitizeBenchmarkGitEnvironment();
-  delete env.NODE_TLS_REJECT_UNAUTHORIZED;
+  const env: NodeJS.ProcessEnv = options.certified
+    ? certifiedCandidateEnvironment(configDir, options.candidateRuntimePath)
+    : sanitizeBenchmarkGitEnvironment();
   env.P_CODING_AGENT_DIR = configDir;
   env.PI_CODING_AGENT_DIR = configDir;
   if (agent === "p" && options.projectInstructions) env.HOME = configDir;
@@ -127,10 +162,9 @@ export function commandForAgent(
   commonArgs.push(prompt);
   env.P_SKIP_VERSION_CHECK = "1";
   env.PI_SKIP_VERSION_CHECK = "1";
-  const caPath = join(homedir(), ".p", "agent", "ca.pem");
-  if (existsSync(caPath)) env.NODE_EXTRA_CA_CERTS = caPath;
+  applyExtraCa(env, options.certified ?? false);
   env.NO_COLOR = "1";
-  env.PATH = augmentBenchmarkPath(repoRoot);
+  if (!options.certified) env.PATH = augmentBenchmarkPath(repoRoot);
   if (agent === "p") {
     return { executable: process.execPath, args: [options.pCli, ...commonArgs], env, cwd: workspace };
   }
@@ -163,7 +197,7 @@ export function commandForKiloModelResolution(
   return {
     executable: options.kiloExecutable ?? "kilo",
     args: ["models", provider, "--verbose", "--pure"],
-    env: kiloEnvironment(configDir),
+    env: kiloEnvironment(configDir, options.certified, options.candidateRuntimePath),
     cwd: workspace,
   };
 }
@@ -175,6 +209,7 @@ export function sandboxedCommandIfNeeded(
   configDir: string,
 ): AgentCommand {
   if (!options.certified || !options.candidateRuntimePath) return command;
+  if (command.env.NODE_EXTRA_CA_CERTS) assertCertifiedExtraCa(command.env.NODE_EXTRA_CA_CERTS);
   const sandboxed = createSandboxedBenchmarkCommand(
     {
       workspace,
@@ -186,6 +221,7 @@ export function sandboxedCommandIfNeeded(
         options.piExecutable,
         options.kiloExecutable,
         options.projectInstructionProbe,
+        command.env.NODE_EXTRA_CA_CERTS,
       ].filter(Boolean) as string[],
       networkHosts: options.certifiedNetworkHosts,
     },

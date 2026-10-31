@@ -49,7 +49,7 @@
 - Never run the full vitest suite directly: it includes e2e tests that activate when endpoint/auth env vars are present. For all non-e2e tests, run `npm run test:unit` from the repo root. Otherwise run specific tests from the package root: `node ../../node_modules/vitest/dist/cli.js --run test/specific.test.ts`.
 - Do not run `npm run test:unit` inside a wrapper with a fixed deadline shorter than the suite. `test.sh` temporarily moves `~/.p/agent/auth.json`; after any interrupted run, verify the primary and `.bak` paths and restore the intact mode-`0600` backup only when the primary is absent.
 - Run `./test.sh` directly with output redirected to a temporary active log; do not route it through lean-ctx's bounded CLI wrapper. Compress the closed log with Brotli Q6 after the process exits.
-- In a fresh worktree, first build workspace `dist` through `./reinstall.sh` before the full `./test.sh`; otherwise internal package imports can fail even when source tests are healthy. Verify shared CLI/daemon ownership before relinking.
+- In a fresh worktree, `./reinstall.sh` builds `dist` only in the installed copy, not in the source checkout. Before the full `./test.sh`, copy each required `dist` directory from the centralized snapshot with the exact source HEAD into the test checkout; never symlink it, because runtime provenance rejects a daemon outside the worktree. Commit checked source before `./reinstall.sh`, and verify shared CLI/daemon ownership before relinking.
 - Poll running background tasks with reasonable intervals that approximately equal to ETA ot reasonably smaller when closer progress monitoring is absolutely necessary. But not repeatedly in tight loops. Hard-Rely on reactive completion messages instead.
 - After restarting a live `p` run, rediscover and identity-bind its newest session JSONL before monitoring; never infer a stall from the previous process's log.
 - Installer smoke checks must bound the entire child process group and require child exit; a printed success line does not prove cleanup completed.
@@ -70,6 +70,10 @@
 - When adding a test under `scripts/`, inspect the root npm test scripts; if its parent suite enumerates files explicitly, add the new file in the same change and run that parent script at least once.
 - Temporary release Git fixtures that recursively delete repositories, remotes, or clones must disable repository-local automatic and detached maintenance/GC unless the test explicitly owns and joins that background lifecycle.
 - Successful child-process regressions must give their kill timeout measured full-suite load margin rather than setting it near the focused runtime.
+- Certified benchmark proxy completion deadlines must cover the bounded startup, preflight, or task-cell budget; a fixed short proxy timeout can silently invalidate a slow real-model comparison before the agent's own deadline.
+- Fake child processes with fixed PIDs must stub process-group signaling and liveness calls; never let a unit test send real signals to a host process group.
+- Symlink security tests must prove link creation occurred or explicitly skip on an unsupported capability; never let a missing link make the assertion pass vacuously.
+- Visual snapshot tests that trigger asynchronous UI work must await the feature's completion signal before capturing the viewport; a fixed sleep is not proof that autocomplete or rendering finished.
 - For `packages/coding-agent/test/suite/`, use `test/suite/harness.ts` + the faux provider. No real provider APIs, keys, or paid tokens.
 - Tests must never write to the real `~/.p/agent`. `packages/coding-agent` Vitest setup (`test/vitest-setup-isolated-agent-dir.ts`) points `P_CODING_AGENT_DIR` at a per-file temp dir and clears `P_CODING_AGENT_SESSION_DIR`; `test/agent-dir-test-isolation.test.ts` guards it. Do not bypass it, and restore these variables after deleting or overriding them.
 - Put issue-specific regressions under `packages/coding-agent/test/suite/regressions/` named `<issue-number>-<short-slug>.test.ts`.
@@ -83,6 +87,7 @@
 - For ad-hoc scripts, `write` them to a temp file (e.g. `/tmp`), run, edit if needed, remove when done. Don't embed multi-line scripts in `bash` commands.
 - Always commit and push changes unless the user asks not to.
 - `./reinstall.sh` is mandatory after code changes. Never use `npm run build` + `npm link` manually. The script handles build, relink, and verification in one step:
+  - Run it from a clean committed source checkout. It stages that exact commit under `~/.p/install/versions/` and executes the actual install there; never globally link `p` or launch its daemon from a mutable development checkout. A per-home install lock serializes global CLI/service changes even with different `P_CODING_AGENT_DIR` values. Keep `~/.p/agent` and Qdrant data separate from installed code.
   1. Hydrates monorepo dependencies (`npm install --ignore-scripts`) and builds all packages (`npm run build`).
   2. Relinks `p` CLI across all global npm prefix locations on `PATH` and verifies version match & compaction settings.
   3. Computes the indexing runtime version hash (`NEW_INDEXING_VERSION`) and compares it against the running daemon's `OLD_INDEXING_VERSION` in `~/.p/agent/indexing-service-status.json`.
@@ -101,6 +106,7 @@
 - Treat npm dep and lockfile changes as reviewed code. Direct external deps stay pinned to exact versions.
 - Hydrate/update locally with `npm install --ignore-scripts`; clean/CI-style with `npm ci --ignore-scripts`. Don't run lifecycle scripts unless the user asks.
 - If dep metadata changes, refresh `package-lock.json` with `npm install --package-lock-only --ignore-scripts`.
+- For simple workspace file operations, use Node filesystem APIs with explicit asset selection instead of adding a shell-command wrapper; test the output layout and missing-source failures.
 - If `packages/coding-agent/npm-shrinkwrap.json` needs regen, run `node scripts/generate-coding-agent-shrinkwrap.js` (verify with `--check` or `npm run check`). New deps with lifecycle scripts require review and an explicit allowlist entry in that script; never add one silently.
 - Pre-commit blocks lockfile commits unless `P_ALLOW_LOCKFILE_CHANGE=1`. Don't bypass unless the user wants the lockfile change committed.
 
@@ -343,6 +349,7 @@ These rules are the portable minimum for Destination Works repositories. Reposit
 - Self-hosted workflows must target verified organization runner labels, check prerequisites early, and prefer runner-local/preinstalled toolchains and caches over dynamic marketplace installers or billing-dependent artifact/cache services.
 - Prove self-hosted readiness as the runner service account with its real non-interactive `HOME`, `PATH`, permissions, working directory, and any runner-managed persisted environment snapshot; an administrator's shell or manually constructed environment is not equivalent to a real workflow job.
 - Prerequisite probes must exercise the concrete subcommands and capabilities the job invokes, not infer support only from a parent runtime's major version.
+- Self-hosted runner users have no privilege escalation: jobs must never call `sudo` or `apt-get`. Verify each required system tool with a non-privileged `command -v` step that fails with an `::error::` naming the tool, and have the runner administrator preinstall it. Install a dependency's native build headers only when the job actually compiles it (`npm ci --ignore-scripts` never does).
 - Runner services must restart after unexpected failure and terminate the complete job process group; for systemd, use `Restart=on-failure` and `KillMode=control-group`. Bound build/test parallelism to the shared host's measured memory budget and provision recovery swap without treating swap as permission for unbounded concurrency.
 - Run unrelated repository or organization runner services under distinct Unix service accounts so user-scoped signals and cleanup cannot cross repository boundaries. After a runner migration, disable superseded services and watchdogs immediately; never leave a deleted registration in an automatic restart loop.
 - Containers that bind-mount a reusable self-hosted worktree must write generated files as the runner UID/GID, or normalize ownership before exit even on failure. Prove a subsequent clean checkout can remove prior outputs.
@@ -366,3 +373,7 @@ These rules are the portable minimum for Destination Works repositories. Reposit
 - Rehearse backup/restore and rollback through safe isolated commands that produce inspectable evidence; documentation-string checks alone are not operational proof.
 
 <!-- /destinationworks-universal-agent-baseline:v1 -->
+
+## Workflow Guidelines
+
+- **Worktree Cleanup**: Once a pull request is merged, always remove its temporary git worktree (`git worktree remove <path>`) and prune stale tracking (`git worktree prune`) to prevent disk space exhaustion.

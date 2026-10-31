@@ -57,7 +57,11 @@ export function inspectRequirementSourceFile(
     if (beforeOpen.size > maxBytes) {
       return `${documentPath} exceeds the ${maxBytes}-byte requirement-source limit.`;
     }
-    if (!isGitTracked(cwd, documentPath)) return `Requirement source must be a Git-tracked file: ${documentPath}`;
+    const tracking = gitTrackingState(cwd, documentPath);
+    if (tracking === "untracked") return `Requirement source must be a Git-tracked file: ${documentPath}`;
+    if (tracking !== "tracked") {
+      return `Cannot verify that requirement source ${documentPath} is Git-tracked because git failed (${tracking.error}). The file may still be tracked; fix the Git environment rather than re-adding or untracking the file.`;
+    }
     descriptor = openSync(absolutePath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
     const opened = fstatSync(descriptor);
     if (!opened.isFile() || opened.nlink !== 1 || opened.dev !== beforeOpen.dev || opened.ino !== beforeOpen.ino) {
@@ -110,12 +114,31 @@ function decodeRequirementSourceText(bytes: Uint8Array): string | { error: strin
   return safetyError ? { error: `${safetyError[0]!.toUpperCase()}${safetyError.slice(1)}.` } : text;
 }
 
-function isGitTracked(cwd: string, documentPath: string): boolean {
-  const tracked = spawnSync("git", ["-C", cwd, "ls-files", "--error-unmatch", "--", documentPath], {
+// Only this message means "not tracked"; any other failure (no repository, sandboxed or missing git,
+// dubious ownership) says nothing about the file and must not be reported as an untracked source.
+const UNTRACKED_PATHSPEC_PATTERN = /did not match any file\(s\) known to git/u;
+const GIT_FAILURE_DETAIL_CHARS = 200;
+
+function gitTrackingState(cwd: string, documentPath: string): "tracked" | "untracked" | { error: string } {
+  // Literal pathspecs: a file named `*.md` must not count as tracked because `a.md` is.
+  const result = spawnSync("git", ["-C", cwd, "ls-files", "--error-unmatch", "--", documentPath], {
     encoding: "utf8",
-    stdio: ["ignore", "ignore", "ignore"],
+    stdio: ["ignore", "ignore", "pipe"],
+    env: { ...process.env, LC_ALL: "C", GIT_LITERAL_PATHSPECS: "1" },
   });
-  return tracked.status === 0;
+  if (result.status === 0) return "tracked";
+  const stderr = result.stderr ?? "";
+  if (result.status === 1 && UNTRACKED_PATHSPEC_PATTERN.test(stderr)) return "untracked";
+  if (result.error) return { error: result.error.message };
+  if (result.signal) return { error: `terminated by ${result.signal}` };
+  const lines = stderr
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const detail = lines.find((line) => /^(?:fatal|error):/u.test(line)) ?? lines[0];
+  if (!detail) return { error: `exit ${result.status}` };
+  const safeDetail = SECRET_PATTERN.test(detail) ? "[git error redacted: it looks like it contains a secret]" : detail;
+  return { error: `exit ${result.status}: ${safeDetail.slice(0, GIT_FAILURE_DETAIL_CHARS)}` };
 }
 
 function hasSymlinkComponent(cwd: string, relPath: string): boolean {

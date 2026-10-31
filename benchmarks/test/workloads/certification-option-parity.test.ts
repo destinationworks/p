@@ -18,3 +18,9 @@ test("certified mode rejects asymmetric verification and compiler-model override
     assert.throws(() => parseRunnerArgs([...base, ...extra]), /Certified mode.*(?:evidence|compiler model)/u);
   }
 });
+
+test("certified cell budgets exceeding the proxy's finite limit fail before execution", () => {
+  for (const option of ["--kilo-startup-timeout-seconds", "--minimum-timeout-seconds", "--timeout-seconds"]) {
+    assert.throws(() => parseRunnerArgs([...base, option, "86401"]), /proxy.*timeout.*24 hours/iu);
+  }
+});

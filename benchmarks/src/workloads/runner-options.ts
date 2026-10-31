@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { maxCertifiedProxyCellMillis } from "../harness/certified-proxy-deadline-policy.ts";
 import { certifiedMinimumRuntimeSeconds } from "./certification-runtime-budget.ts";
 import { printRunnerHelp as displayRunnerHelp } from "./runner-help.ts";
 import { isThinkingLevel, type ThinkingLevel } from "./thinking-level.ts";
@@ -253,6 +254,15 @@ export function parseRunnerArgs(argv: readonly string[]): RunnerOptions {
     options.kiloModel ??= options.model;
     options.projectInstructions = "compiled";
     options.taskVerificationMode = "evidence";
+    for (const [name, seconds] of Object.entries({
+      "--kilo-startup-timeout-seconds": options.kiloStartupTimeoutSeconds,
+      "--minimum-timeout-seconds": options.minimumTimeoutSeconds,
+      "--timeout-seconds": options.timeoutSeconds,
+    })) {
+      if (seconds !== undefined && seconds * 1000 > maxCertifiedProxyCellMillis) {
+        throw new Error(`${name} exceeds the certified proxy timeout limit of 24 hours`);
+      }
+    }
     const minimumRuntime = certifiedMinimumRuntimeSeconds(options);
     if (explicitMaxRuntime && options.maxRuntimeSeconds < minimumRuntime) {
       throw new Error(`Certified --max-runtime-seconds must be at least ${minimumRuntime}`);

@@ -29,9 +29,104 @@ function result(overrides: Partial<ProbeResult> = {}): ProbeResult {
 
 const modelResolution = () => result({ rawStdout: 'surface/model\n{"api":{"id":"backend/model"}}\n' });
 
+test("Kilo startup retains terminal model evidence emitted after the reply text", async () => {
+  const root = mkdtempSync(join(tmpdir(), "kilo-startup-late-model-"));
+  const config = join(root, "config");
+  const output = join(root, "output");
+  mkdirSync(config);
+  mkdirSync(output);
+  const options = parseRunnerArgs([
+    "--agents",
+    "kilo",
+    "--kilo-model",
+    "surface/model",
+    "--expected-resolved-model",
+    "backend/model",
+  ]);
+  let invocation = 0;
+  try {
+    const evidence = await runKiloStartupProbe(
+      options,
+      config,
+      output,
+      performance.now() + 10_000,
+      async (_command, _timeout, _recording, commandOptions) => {
+        invocation += 1;
+        if (invocation === 1) return modelResolution();
+        assert.equal(
+          commandOptions?.stopOnMarker,
+          undefined,
+          "The text marker must not truncate terminal model evidence",
+        );
+        return result({
+          stdout: `${JSON.stringify({ type: "text", part: { id: "1", type: "text", text: "benchmark-startup-ok" } })}\n${JSON.stringify({ type: "step_finish", part: { id: "2", type: "step-finish", model: "backend/model", tokens: { input: 1, output: 1, total: 2 } } })}\n`,
+          rawEventCount: 2,
+        });
+      },
+    );
+    assert.equal(invocation, 2);
+    assert.equal(evidence.status, "passed");
+    assert.equal(evidence.request?.responseMatched, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("certified Kilo startup accepts absent CLI model only with matching wire evidence", async () => {
+  const root = mkdtempSync(join(tmpdir(), "kilo-startup-wire-model-"));
+  const config = join(root, "config");
+  const output = join(root, "output");
+  mkdirSync(config);
+  mkdirSync(output);
+  const options = parseRunnerArgs([
+    "--certified",
+    "--model",
+    "surface/model",
+    "--agents",
+    "p,pi,kilo",
+    "--kilo-model",
+    "surface/model",
+    "--expected-resolved-model",
+    "backend/model",
+    "--runs",
+    "3",
+  ]);
+  const wire = {
+    requestCount: 1,
+    requestModels: ["backend/model"],
+    responseModels: ["backend/model"],
+    requestHashes: ["a".repeat(64)],
+  };
+  try {
+    const evidence = await runKiloStartupProbe(
+      options,
+      config,
+      output,
+      performance.now() + 10_000,
+      async (_command, _timeout, _recording, commandOptions) =>
+        commandOptions?.collectRawStdout
+          ? modelResolution()
+          : result({ stdout: kiloText("benchmark-startup-ok", null) }),
+      { endCell: () => wire },
+    );
+    assert.equal(evidence.status, "passed");
+    assert.deepEqual(evidence.proxyEvidence, wire);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("Kilo startup rejects wrong response, timeout, nonzero exit, parser failure, and raw echoed marker", async () => {
   const cases: Array<{ name: string; request: ProbeResult }> = [
     { name: "wrong response", request: result({ stdout: kiloText("wrong") }) },
+    { name: "missing model", request: result({ stdout: kiloText("benchmark-startup-ok", null) }) },
+    { name: "wrong model", request: result({ stdout: kiloText("benchmark-startup-ok", "other/model") }) },
+    {
+      name: "mixed models",
+      request: result({
+        stdout: `${JSON.stringify({ type: "step_finish", part: { id: "other", type: "step-finish", model: "other/model" } })}\n${kiloText("benchmark-startup-ok")}`,
+      }),
+    },
     { name: "timeout", request: result({ timedOut: true, stdout: kiloText("benchmark-startup-ok") }) },
     { name: "nonzero", request: result({ code: 7, stdout: kiloText("benchmark-startup-ok") }) },
     {
@@ -104,6 +199,6 @@ test("a confirmed recording failure is not mislabeled as unconfirmed termination
   }
 });
 
-function kiloText(text: string): string {
-  return `${JSON.stringify({ type: "step_finish", part: { id: "1", type: "step-finish", model: "backend/model", tokens: { input: 1, output: 1, total: 2 } } })}\n${JSON.stringify({ type: "text", part: { id: "2", type: "text", text } })}\n`;
+function kiloText(text: string, model: string | null = "backend/model"): string {
+  return `${JSON.stringify({ type: "step_finish", part: { id: "1", type: "step-finish", model, tokens: { input: 1, output: 1, total: 2 } } })}\n${JSON.stringify({ type: "text", part: { id: "2", type: "text", text } })}\n`;
 }

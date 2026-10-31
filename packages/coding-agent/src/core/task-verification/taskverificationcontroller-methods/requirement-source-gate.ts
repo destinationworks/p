@@ -8,9 +8,9 @@ import {
 import { sourcePromptsForState } from "../requirement-audit-hashing.ts";
 import type { TaskVerificationController } from "../taskverificationcontroller.ts";
 import {
-  isConfidentlyReadOnlyShellTool,
   isDirectMutationTool,
   isPublishCommand,
+  isReadOnlyDiscoveryShellTool,
   isShellTool,
 } from "../tool-classification.ts";
 
@@ -58,5 +58,5 @@ export function requirementSourceMutationGate(
 
 export function canPotentiallyChangeWorkspace(toolName: string, args: unknown): boolean {
   if (isDirectMutationTool(toolName)) return true;
-  return isShellTool(toolName) && !isPublishCommand(toolName, args) && !isConfidentlyReadOnlyShellTool(toolName, args);
+  return isShellTool(toolName) && !isPublishCommand(toolName, args) && !isReadOnlyDiscoveryShellTool(toolName, args);
 }

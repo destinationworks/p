@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "packages": ["coding-agent"],
+  "type": "None",
+  "reason": "Benchmark-only: suppress Kilo title-model side calls and classify proxy transport failures without leaking payloads."
+}

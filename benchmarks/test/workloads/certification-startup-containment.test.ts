@@ -53,7 +53,14 @@ test(
       ]);
       options.candidateRuntimePath = runtime;
 
-      const evidence = await runKiloStartupProbe(options, config, output, performance.now() + 30_000);
+      const evidence = await runKiloStartupProbe(options, config, output, performance.now() + 30_000, undefined, {
+        endCell: () => ({
+          requestCount: 1,
+          requestModels: ["backend/model"],
+          responseModels: ["backend/model"],
+          requestHashes: ["a".repeat(64)],
+        }),
+      });
 
       assert.equal(evidence.status, "passed");
       assert.equal(

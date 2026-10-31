@@ -242,7 +242,7 @@ describe("evidence-mode critical proof lifecycle", () => {
       expect(restored.restoreError).toBeUndefined();
       expect(
         (await beforeEvidenceTool(harness.agent, "write", { path: "src/store.ts", content: "export {};\n" }))?.reason,
-      ).toContain("More than four distinct critical proof boundaries");
+      ).toContain("introduce more than four critical proof boundaries");
       await sendPrompt(harness, "Do not use SPEC-5.md as a requirement source.", 101);
       expect(harness.controller.currentState.criticalProofObligationOverflow).toBeUndefined();
       expect(harness.controller.currentState.criticalProofObligations).toHaveLength(4);

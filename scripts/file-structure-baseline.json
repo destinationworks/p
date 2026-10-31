@@ -13,7 +13,7 @@
   },
   "packages/agent/src/harness/skills.ts": {
     "classes": 0,
-    "lines": 375
+    "lines": 374
   },
   "packages/agent/src/harness/types.ts": {
     "classes": 6,
@@ -208,8 +208,8 @@
     "lines": 59
   },
   "packages/code-index/embedding_server.py": {
-    "classes": 2,
-    "lines": 803
+    "classes": 1,
+    "lines": 798
   },
   "packages/code-index/resource_manager.py": {
     "classes": 2,
@@ -345,7 +345,7 @@
   },
   "packages/coding-agent/src/core/skills.ts": {
     "classes": 0,
-    "lines": 487
+    "lines": 442
   },
   "packages/coding-agent/src/core/tools/bash.ts": {
     "classes": 1,
