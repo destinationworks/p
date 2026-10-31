@@ -1,5 +1,7 @@
+import { ProcessTerminal, type Terminal } from "@dst0/p-tui";
 import { describe, expect, it } from "vitest";
 import {
+  canWaitForKeyboardProtocolNegotiation,
   getTerminalNewLineHint,
   type TerminalNewLineHintInput,
 } from "../src/modes/interactive/interactive-mode/interactivemode-methods/terminal-newline-hint.ts";
@@ -86,5 +88,32 @@ describe("getTerminalNewLineHint", () => {
     expect(getTerminalNewLineHint(hintInput({ newLineKeys: ["alt+enter"] }))).toBeUndefined();
     expect(getTerminalNewLineHint(hintInput({ newLineKeys: ["shift+tab", "f2"] }))).toBeUndefined();
     expect(getTerminalNewLineHint(hintInput({ newLineKeys: [] }))).toBeUndefined();
+  });
+});
+
+describe("canWaitForKeyboardProtocolNegotiation", () => {
+  const terminalWith = (members: Record<string, unknown>): Terminal => members as unknown as Terminal;
+
+  it("accepts a terminal that implements the negotiation wait", () => {
+    expect(
+      canWaitForKeyboardProtocolNegotiation(terminalWith({ waitForKeyboardProtocolNegotiation: async () => true })),
+    ).toBe(true);
+    expect(canWaitForKeyboardProtocolNegotiation(new ProcessTerminal())).toBe(true);
+  });
+
+  it("rejects a terminal without the wait, as virtual and test terminals have none", () => {
+    expect(canWaitForKeyboardProtocolNegotiation(terminalWith({ kittyProtocolActive: false }))).toBe(false);
+    expect(canWaitForKeyboardProtocolNegotiation(terminalWith({ waitForKeyboardProtocolNegotiation: undefined }))).toBe(
+      false,
+    );
+  });
+
+  it("rejects a non-function member instead of trusting its truthiness", () => {
+    expect(canWaitForKeyboardProtocolNegotiation(terminalWith({ waitForKeyboardProtocolNegotiation: true }))).toBe(
+      false,
+    );
+    expect(canWaitForKeyboardProtocolNegotiation(terminalWith({ waitForKeyboardProtocolNegotiation: "wait" }))).toBe(
+      false,
+    );
   });
 });

@@ -188,6 +188,15 @@ describe("showTerminalNewLineHint", () => {
     expect(self.showWarning).not.toHaveBeenCalled();
   });
 
+  it("treats a non-function wait member as unsupported at the call site", async () => {
+    const terminal = { kittyProtocolActive: false, waitForKeyboardProtocolNegotiation: true };
+    const self = createSelf({ terminal: terminal as unknown as FakeTerminal });
+
+    await showTerminalNewLineHint(asMode(self));
+
+    expect(self.showWarning).not.toHaveBeenCalled();
+  });
+
   it("stays silent for terminals that do not negotiate a keyboard protocol", async () => {
     const self = createSelf({ terminal: { kittyProtocolActive: false } });
 

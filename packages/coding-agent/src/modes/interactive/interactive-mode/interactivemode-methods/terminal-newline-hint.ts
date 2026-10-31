@@ -1,4 +1,4 @@
-import { getKeybindings, hasAppleTerminalShiftEnterFallback } from "@dst0/p-tui";
+import { getKeybindings, hasAppleTerminalShiftEnterFallback, type Terminal } from "@dst0/p-tui";
 import { formatKeyText } from "../../components/keybinding-hints.ts";
 import type { InteractiveMode } from "../interactivemode.ts";
 
@@ -6,6 +6,19 @@ import type { InteractiveMode } from "../interactivemode.ts";
 export const TERMINAL_NEWLINE_HINT_TIMEOUT_MS = 2000;
 
 const NEW_LINE_FALLBACK = "Use Ctrl+J or \\ then Enter for a new line.";
+
+/** A terminal that can report when the startup keyboard protocol query was answered (`ProcessTerminal`). */
+export type NegotiatingTerminal = Terminal & {
+  waitForKeyboardProtocolNegotiation(timeoutMs: number): Promise<boolean>;
+};
+
+/** Terminals without keyboard protocol negotiation (virtual or test terminals) do not implement the wait. */
+export function canWaitForKeyboardProtocolNegotiation(terminal: Terminal): terminal is NegotiatingTerminal {
+  return (
+    "waitForKeyboardProtocolNegotiation" in terminal &&
+    typeof terminal.waitForKeyboardProtocolNegotiation === "function"
+  );
+}
 
 export interface TerminalNewLineHintInput {
   kittyProtocolActive: boolean;
@@ -53,7 +66,7 @@ export async function showTerminalNewLineHint(self: InteractiveMode): Promise<vo
   try {
     if (self.settingsManager.getWarnings().terminalNewLine === false) return;
     const terminal = self.ui.terminal;
-    if (!terminal.waitForKeyboardProtocolNegotiation) return;
+    if (!canWaitForKeyboardProtocolNegotiation(terminal)) return;
 
     await terminal.waitForKeyboardProtocolNegotiation(TERMINAL_NEWLINE_HINT_TIMEOUT_MS);
 
