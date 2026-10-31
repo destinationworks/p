@@ -161,7 +161,9 @@ function chunkBySymbols(
   let lineIndex = 0;
   const matches = content.matchAll(pattern);
   for (const match of matches) {
-    for (; scannedOffset < match.index; scannedOffset++) {
+    // `^\s*` can start right after a CR or span blank lines, so count lines up to the declaration itself.
+    const declarationOffset = match.index + match[0].length - match[0].trimStart().length;
+    for (; scannedOffset < declarationOffset; scannedOffset++) {
       if (content.charCodeAt(scannedOffset) === 10) lineIndex++;
     }
     if (lineIndex > 0 && lineIndex < totalLines) {

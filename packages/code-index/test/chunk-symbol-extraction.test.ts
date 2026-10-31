@@ -136,7 +136,7 @@ describe("code chunking and multi-language symbol extraction", () => {
     const source = [
       "const first = 1;",
       "// comment for second",
-      "export function second() { return \"😀\"; }",
+      'export function second() { return "😀"; }',
       "const third = 3;",
     ].join("\r\n");
     const chunks = chunkFile(source, "typescript", 80, 300);
@@ -145,7 +145,12 @@ describe("code chunking and multi-language symbol extraction", () => {
       [2, 3, "function second"],
       [4, 4, "const third"],
     ]);
-    expect(chunks.map((chunk) => chunk.text).join("\n").replaceAll("\r", "")).toBe(source.replaceAll("\r", ""));
+    expect(
+      chunks
+        .map((chunk) => chunk.text)
+        .join("\n")
+        .replaceAll("\r", ""),
+    ).toBe(source.replaceAll("\r", ""));
   });
 
   it("scales to 20,000 densely packed declarations without rescanning prefixes", () => {
@@ -159,5 +164,4 @@ describe("code chunking and multi-language symbol extraction", () => {
     expect(chunks.at(-1)).toMatchObject({ startLine: count, endLine: count, symbol: `function f${count - 1}` });
     expect(elapsedMs).toBeLessThan(4_000);
   });
-
 });
