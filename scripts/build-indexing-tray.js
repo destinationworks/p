@@ -42,6 +42,22 @@ export function buildMacOsIndexingTray(destinationPath = OUTPUT_BIN) {
   return { success: true, binaryPath: destinationPath };
 }
 
+// indexing_tray.py imports its siblings, so they must be installed next to it.
+export const LINUX_TRAY_FILES = ["indexing_tray.py", "indexing_tray_service.py", "indexing_tray_status.py"];
+
+export function copyLinuxIndexingTray(codeIndexDir, serviceRoot) {
+  const copied = [];
+  for (const name of LINUX_TRAY_FILES) {
+    const source = path.join(codeIndexDir, name);
+    if (!fs.existsSync(source)) continue;
+    const destination = path.join(serviceRoot, name);
+    fs.copyFileSync(source, destination);
+    fs.chmodSync(destination, 0o755);
+    copied.push(name);
+  }
+  return copied;
+}
+
 export function installIndexingTray(agentDir, codeIndexDir, binDir, serviceRoot) {
   if (process.platform === "darwin") {
     try {
@@ -50,11 +66,7 @@ export function installIndexingTray(agentDir, codeIndexDir, binDir, serviceRoot)
       console.warn(`Note: Could not build macOS indexing tray app: ${error instanceof Error ? error.message : String(error)}`);
     }
   } else if (process.platform === "linux") {
-    const traySrc = path.join(codeIndexDir, "indexing_tray.py");
-    if (fs.existsSync(traySrc)) {
-      fs.copyFileSync(traySrc, path.join(serviceRoot, "indexing_tray.py"));
-      fs.chmodSync(path.join(serviceRoot, "indexing_tray.py"), 0o755);
-    }
+    copyLinuxIndexingTray(codeIndexDir, serviceRoot);
   }
 }
 

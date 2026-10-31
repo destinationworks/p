@@ -9,6 +9,7 @@ import {
   createBenchmarkSandboxProfile,
   createSandboxedBenchmarkCommand,
 } from "../../src/harness/benchmark-isolation.ts";
+import { certifiedCandidateEnvironment } from "../../src/harness/certified-candidate-environment.ts";
 
 test(
   "sandbox profile limits a child to its workspace and candidate runtime",
@@ -110,6 +111,59 @@ test(
       });
       assert.equal(writeWorkspaceResult.status, 0);
       assert.equal(createBenchmarkSandboxProfile({ workspace, runtime }).includes(forbidden), false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "certified candidate can verify a tracked requirement with real Git inside containment",
+  { skip: !benchmarkSandboxExecutable() },
+  () => {
+    const root = mkdtempSync(join(tmpdir(), "benchmark-tracked-requirement-"));
+    const workspace = join(root, "workspace");
+    const runtime = join(root, "runtime");
+    const configDir = join(root, "config");
+    for (const directory of [workspace, runtime, configDir]) mkdirSync(directory);
+    try {
+      writeFileSync(join(workspace, "requirements.md"), "Synthetic requirement.\n");
+      writeFileSync(join(workspace, "untracked.md"), "Not an authoritative requirement.\n");
+      const gitEnv = {
+        PATH: "/usr/bin:/bin",
+        GIT_CONFIG_GLOBAL: "/dev/null",
+        GIT_CONFIG_NOSYSTEM: "1",
+        GIT_TERMINAL_PROMPT: "0",
+      };
+      for (const args of [
+        ["init", "--quiet", "--initial-branch=main"],
+        ["config", "--local", "gc.auto", "0"],
+        ["config", "--local", "gc.autoDetach", "false"],
+        ["config", "--local", "maintenance.auto", "false"],
+        ["add", "--", "requirements.md"],
+      ]) {
+        const result = spawnSync("/usr/bin/git", args, { cwd: workspace, env: gitEnv, encoding: "utf8" });
+        assert.equal(result.status, 0, result.stderr);
+      }
+      const probe = join(workspace, "verify-git.js");
+      writeFileSync(
+        probe,
+        'import { spawnSync } from "node:child_process"; const result = spawnSync("git", ["ls-files", "--error-unmatch", "--", process.argv[2]], { encoding: "utf8" }); process.stderr.write(result.stderr ?? ""); process.exit(result.status ?? 1);\n',
+      );
+      const environment = certifiedCandidateEnvironment(configDir, runtime);
+      const runProbe = (document: string) => {
+        const command = createSandboxedBenchmarkCommand({ workspace, runtime, configDir }, process.execPath, [
+          probe,
+          document,
+        ]);
+        return spawnSync(command.executable, command.args, { cwd: workspace, env: environment, encoding: "utf8" });
+      };
+      const tracked = runProbe("requirements.md");
+      assert.equal(tracked.status, 0, `signal=${tracked.signal ?? ""} stderr=${tracked.stderr}`);
+      assert.equal(tracked.stderr, "");
+      const untracked = runProbe("untracked.md");
+      assert.notEqual(untracked.status, 0);
+      assert.match(untracked.stderr, /did not match any file/u);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

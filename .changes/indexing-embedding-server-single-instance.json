@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "packages": ["coding-agent"],
+  "type": "Fixed",
+  "summary": "Stop the indexing daemon from piling up duplicate embedding servers (about 1.7 GB each) when the real one is busy or still loading: startup now waits on a listening port or live child, the Python server binds its port before loading the model, Qdrant logs at WARN, and reinstall archives service logs over 50 MB."
+}

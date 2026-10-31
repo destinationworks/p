@@ -21,11 +21,15 @@ export function isAuthoritativeRequirementSourceCandidate(
   candidate: RequirementSourceCandidateIdentity,
 ): boolean {
   const contexts = candidateContexts(prompts, candidate);
-  return contexts.some(
-    ({ before, after }) =>
-      SOURCE_CUE_BEFORE_PATTERN.test(before) ||
-      SOURCE_LIST_CUE_BEFORE_PATTERN.test(before) ||
-      SOURCE_CUE_AFTER_PATTERN.test(after),
+  return contexts.some(({ before, after }) => contextCitesRequirementSource(before, after));
+}
+
+/** Whether the lowercase text around one path occurrence cites that path as a requirement source. */
+export function contextCitesRequirementSource(before: string, after: string): boolean {
+  return (
+    SOURCE_CUE_BEFORE_PATTERN.test(before) ||
+    SOURCE_LIST_CUE_BEFORE_PATTERN.test(before) ||
+    SOURCE_CUE_AFTER_PATTERN.test(after)
   );
 }
 

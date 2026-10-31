@@ -1,5 +1,6 @@
 import { existsSync, realpathSync } from "node:fs";
 import { dirname } from "node:path";
+import { certifiedGitExecutable } from "./certified-git-executable.ts";
 
 export interface BenchmarkIsolationPaths {
   workspace: string;
@@ -47,6 +48,7 @@ export function createBenchmarkSandboxProfile(
   ];
   const configDir = paths.configDir && existsSync(paths.configDir) ? realpathSync(paths.configDir) : undefined;
   const extraLiterals = new Set<string>();
+  if (process.platform === "darwin") extraLiterals.add(certifiedGitExecutable());
   for (const candidate of paths.extraReadPaths ?? []) {
     if (!candidate) continue;
     if (existsSync(candidate)) {

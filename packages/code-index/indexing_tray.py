@@ -7,15 +7,22 @@ display server (X11 / Wayland) is available.
 
 from __future__ import annotations
 
-import datetime
 import fcntl
 import json
 import os
 import signal
 import subprocess
 import sys
-import uuid
 from pathlib import Path
+
+from indexing_tray_service import OP_RESTART, ServiceMonitor
+from indexing_tray_status import (
+    is_daemon_running,
+    read_json_file,
+    repo_state_description,
+    request_priority,
+    status_line,
+)
 
 
 def is_gui_available() -> bool:
@@ -30,17 +37,6 @@ def get_agent_dir() -> Path:
     return Path.home() / ".p" / "agent"
 
 
-def read_json_file(path: Path) -> dict:
-    if not path.exists():
-        return {}
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
-
-
 class IndexingTrayApp:
     def __init__(self, agent_dir: Path):
         self.agent_dir = agent_dir
@@ -49,6 +45,8 @@ class IndexingTrayApp:
         self.registry_file = agent_dir / "indexed-repos.json"
         self.indicator = None
         self.app = None
+        self.glib = None
+        self.service = ServiceMonitor()
 
     def run(self) -> None:
         try:
@@ -56,6 +54,8 @@ class IndexingTrayApp:
             gi.require_version("Gtk", "3.0")
             from gi.repository import GLib, Gtk
 
+            self.glib = GLib
+            self.service.refresh_async()
             try:
                 gi.require_version("AyatanaAppIndicator3", "0.1")
                 from gi.repository import AyatanaAppIndicator3 as AppIndicator3
@@ -94,12 +94,14 @@ class IndexingTrayApp:
         menu.popup(None, None, Gtk.StatusIcon.position_menu, icon, button, activate_time)
 
     def on_timer_tick(self, Gtk) -> bool:
+        self.service.refresh_async()
         self.rebuild_menu(Gtk)
         return True
 
     def on_timer_tick_fallback(self, status_icon) -> bool:
+        self.service.refresh_async()
         status_data = read_json_file(self.status_file)
-        running = status_data.get("running", False)
+        running = is_daemon_running(status_data, self.service.state)
         repos = status_data.get("repos", [])
         is_indexing = any(r.get("state") == "indexing" for r in repos)
         if not running:
@@ -122,29 +124,17 @@ class IndexingTrayApp:
         status_data = read_json_file(self.status_file)
         config_data = read_json_file(self.config_file)
 
-        running = status_data.get("running", False)
+        plan = self.service.plan()
+        running = is_daemon_running(status_data, self.service.state)
         repos = status_data.get("repos", [])
-        is_indexing = any(r.get("state") == "indexing" for r in repos)
 
         # 1. Title
         title_item = Gtk.MenuItem(label="P Code Indexing")
         title_item.set_sensitive(False)
         menu.append(title_item)
 
-        # 2. Status
-        if not running:
-            status_text = "  Status: Stopped"
-        elif is_indexing:
-            active = next((r for r in repos if r.get("state") == "indexing"), None)
-            name = Path(active["path"]).name if active and "path" in active else "repo"
-            pct = ""
-            if active and isinstance(active.get("progress"), dict):
-                p = active["progress"].get("percent")
-                if p is not None:
-                    pct = f" ({int(p)}%)"
-            status_text = f"  Status: Indexing {name}{pct}"
-        else:
-            status_text = "  Status: Ready (Idle)"
+        # 2. Status (decided from cached service state; systemctl never runs on this thread)
+        status_text = status_line(status_data, self.service.state, self.service.is_stale())
         status_item = Gtk.MenuItem(label=status_text)
         status_item.set_sensitive(False)
         menu.append(status_item)
@@ -171,21 +161,15 @@ class IndexingTrayApp:
             for repo in repos:
                 repo_path = repo.get("path", "")
                 name = Path(repo_path).name or repo_path
-                state = repo.get("state", "unknown")
-                if state == "indexing":
-                    desc = "Indexing"
-                elif state == "error":
-                    desc = "Error"
-                else:
-                    files = repo.get("indexedFiles", 0)
-                    desc = f"Ready ({files} files)"
+                desc = repo_state_description(repo, running)
 
                 r_item = Gtk.MenuItem(label=f"{name} - {desc}")
                 r_sub = Gtk.Menu()
                 r_item.set_submenu(r_sub)
 
                 pri_item = Gtk.MenuItem(label="Prioritize / Re-index")
-                pri_item.connect("activate", lambda _, p=repo_path: self.prioritize_repo(p))
+                pri_item.connect("activate", lambda _, p=repo_path: request_priority(self.registry_file, p))
+                pri_item.set_sensitive(plan.controls_enabled)
                 r_sub.append(pri_item)
 
                 repos_menu.append(r_item)
@@ -197,7 +181,7 @@ class IndexingTrayApp:
         # 5. Actions
         reindex_item = Gtk.MenuItem(label="Reindex All Repositories")
         reindex_item.connect("activate", lambda _: self.reindex_all(repos))
-        reindex_item.set_sensitive(running)
+        reindex_item.set_sensitive(running and plan.controls_enabled)
         menu.append(reindex_item)
         logs_item = Gtk.MenuItem(label="View Service Logs...")
         logs_item.connect("activate", lambda _: self.open_file(self.agent_dir / "indexing-service" / "logs" / "service.log"))
@@ -205,8 +189,14 @@ class IndexingTrayApp:
         config_item = Gtk.MenuItem(label="Open Configuration...")
         config_item.connect("activate", lambda _: self.open_file(self.config_file))
         menu.append(config_item)
+        toggle_item = Gtk.MenuItem(label=plan.toggle_title)
+        toggle_item.set_sensitive(plan.toggle_enabled)
+        if plan.toggle_operation is not None:
+            toggle_item.connect("activate", lambda _, op=plan.toggle_operation: self.run_service_operation(Gtk, op))
+        menu.append(toggle_item)
         restart_item = Gtk.MenuItem(label="Restart Indexing Service")
-        restart_item.connect("activate", lambda _: self.restart_service())
+        restart_item.set_sensitive(plan.controls_enabled)
+        restart_item.connect("activate", lambda _: self.run_service_operation(Gtk, OP_RESTART))
         menu.append(restart_item)
         menu.append(Gtk.SeparatorMenuItem())
 
@@ -219,39 +209,28 @@ class IndexingTrayApp:
         menu.append(quit_item)
         return menu
 
-    def prioritize_repo(self, repo_path: str) -> None:
-        if not repo_path or not self.registry_file.exists():
-            return
-        data = read_json_file(self.registry_file)
-        repos = data.get("repos", [])
-        if not isinstance(repos, list):
-            return
-        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        req_id = str(uuid.uuid4())
-        for repo in repos:
-            if isinstance(repo, dict) and repo.get("path") == repo_path:
-                repo["priorityRequest"] = {"id": req_id, "requestedAt": now}
-                break
-        temp_file = self.registry_file.with_suffix(f".{os.getpid()}.tmp")
-        try:
-            with open(temp_file, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
-            temp_file.replace(self.registry_file)
-        except Exception:
-            pass
-
     def reindex_all(self, repos: list) -> None:
         for repo in repos:
             if "path" in repo:
-                self.prioritize_repo(repo["path"])
+                request_priority(self.registry_file, repo["path"])
 
     def open_file(self, path: Path) -> None:
         if path.exists():
             subprocess.Popen(["xdg-open", str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    def restart_service(self) -> None:
-        subprocess.Popen(["systemctl", "--user", "restart", "com.dst.p.code-index.service"],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    def run_service_operation(self, Gtk, operation: str) -> None:
+        def on_done(ok: bool, message: str) -> None:
+            if not ok and self.glib is not None:
+                self.glib.idle_add(self.show_error, Gtk, message)
+
+        self.service.operate_async(operation, on_done)
+
+    def show_error(self, Gtk, message: str) -> bool:
+        dialog = Gtk.MessageDialog(message_type=Gtk.MessageType.ERROR, buttons=Gtk.ButtonsType.CLOSE, text="P Code Indexing")
+        dialog.format_secondary_text(message)
+        dialog.run()
+        dialog.destroy()
+        return False
 
     def disable_tray(self, Gtk) -> None:
         config = read_json_file(self.config_file)

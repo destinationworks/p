@@ -24,13 +24,12 @@ import sys
 import time
 from collections.abc import Callable
 from dataclasses import replace
-from http.server import HTTPServer
-from socketserver import ThreadingMixIn
 
 from embedding_runtime_config import EmbeddingRuntimeConfig, config_path_from_arguments, load_embedding_runtime_config
 from embedding_benchmark import BENCHMARK_CORPUS
 from embedding_performance import EmbeddingPerformanceTracker
 from embedding_http_handler import EmbeddingHttpHandler, configure as configure_http_handler
+from embedding_http_server import bind_http_server
 from embedding_mps_policy import sentence_transformer_encode_options
 from embedding_priority_lock import EmbeddingPriorityLock
 
@@ -770,17 +769,8 @@ def _format_optional_bytes(value: int | None) -> str:
     return "unavailable" if value is None else _format_bytes(value)
 
 
-class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
-    daemon_threads = True
-
-    def server_close(self):
-        try:
-            super().server_close()
-        except OSError:
-            pass  # Ignore "Cannot assign requested address" on close
-
-
 def main():
+    global server
     parser = argparse.ArgumentParser(description="Embedding server for code-index")
     parser.add_argument("--port", type=int, default=18742)
     parser.add_argument("--model")
@@ -788,15 +778,20 @@ def main():
     args = parser.parse_args()
     runtime_config = load_embedding_runtime_config(args.config)
 
-    global server
-    server = EmbeddingServer(args.model or runtime_config.embedding_model, runtime_config)
-    server.load()
-    configure_http_handler(server, torch.inference_mode, _run_encode_request)
+    # Claim the port before loading the model so a duplicate launch exits
+    # without paying for the weights. Requests that arrive while the model
+    # loads wait in the listen backlog until serve_forever() starts.
+    httpd = bind_http_server(args.port, EmbeddingHttpHandler)
+    try:
+        server = EmbeddingServer(args.model or runtime_config.embedding_model, runtime_config)
+        server.load()
+        configure_http_handler(server, torch.inference_mode, _run_encode_request)
 
-    addr = ("127.0.0.1", args.port)
-    httpd = ThreadedHTTPServer(addr, EmbeddingHttpHandler)
-    print(f"Embedding server listening on http://{addr[0]}:{addr[1]} (threaded)", flush=True)
-    httpd.serve_forever()
+        host, port = httpd.server_address[:2]
+        print(f"Embedding server listening on http://{host}:{port} (threaded)", flush=True)
+        httpd.serve_forever()
+    finally:
+        httpd.server_close()
 
 
 if __name__ == "__main__":
