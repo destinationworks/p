@@ -1,0 +1,9 @@
+# 2026-10-12 — Certified benchmark Git toolchain containment
+
+- **Status:** Fixed in benchmark harness; fresh live matrix still required.
+- **Symptom:** In the first scored P calculator cell, writes and later shell commands failed with `Requirement source must be a Git-tracked file: requirements.md`; P could not change task files.
+- **Decisive evidence:** The benchmark workspace initializer had added `requirements.md` to Git before candidate launch. A synthetic repository reproduced success for `git ls-files --error-unmatch` outside the candidate sandbox and failure inside it. The sandboxed `/usr/bin/git` shim emitted `xcrun`'s `libxcrun.dylib` filesystem-denial error. A direct Apple developer-toolchain Git executable succeeded with one literal read grant.
+- **Root cause:** The certified candidate PATH selected macOS's `/usr/bin/git` xcrun shim, while the sandbox denied the developer toolchain it tries to load. P's requirement check interpreted Git's nonzero exit as an untracked file, so the benchmark measured a harness failure instead of agent capability.
+- **Fix:** Resolve Git with `xcrun --find git` before containment, require a trusted Apple developer-toolchain path, place its directory first in certified PATH, and grant read access to that exact executable only. Do not grant the entire developer-toolchain tree or weaken requirement-source validation.
+- **Verification:** The real-Git sandbox regression failed before the change with the `libxcrun.dylib` denial and passed after it; the regression also rejects a present but untracked requirement. The full certified P/Pi/Kilo matrix and its raw evidence must be rerun before any quality or release claim.
+- **Prevention:** Exercise real executable resolution inside the same containment and environment as candidates, with both tracked and untracked fixtures. Never equate an infrastructure Git failure with an untracked source without checking the underlying command outcome.
