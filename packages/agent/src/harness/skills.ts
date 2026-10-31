@@ -219,10 +219,9 @@ function prefixIgnorePattern(line: string, prefix: string): string | null {
 
   let pattern = line;
   let negated = false;
+  // A leading `\!` escapes a name that starts with `!`; keep the backslash so the root pattern is not a negation.
   if (pattern.startsWith("!")) {
     negated = true;
-    pattern = pattern.slice(1);
-  } else if (pattern.startsWith("\\!")) {
     pattern = pattern.slice(1);
   }
   if (pattern.startsWith("/")) pattern = pattern.slice(1);

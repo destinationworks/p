@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "packages": ["agent", "coding-agent"],
+  "type": "Fixed",
+  "summary": "Honor an escaped leading `\\!` in skill and extension-package `.gitignore`/`.ignore`/`.fdignore` files so a file literally named `!name` is ignored instead of the line being read as a negation."
+}

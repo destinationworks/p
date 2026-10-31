@@ -1,8 +1,9 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import ignore from "ignore";
+import { addIgnoreRules } from "../ignore-file-patterns.ts";
 import type { IgnoreMatcher, SkillDiscoveryMode } from "./types.ts";
-import { addIgnoreRules, toPosixPath } from "./version-resolution.ts";
+import { toPosixPath } from "./version-resolution.ts";
 
 export function collectFiles(
   dir: string,
