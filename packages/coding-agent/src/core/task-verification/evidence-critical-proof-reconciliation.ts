@@ -5,6 +5,7 @@ import {
 import { MAX_EVIDENCE_CRITICAL_PROOF_OBLIGATIONS } from "./evidence-critical-proof.ts";
 import {
   activeRequirementSourceCandidateCatalog,
+  MAX_REQUIREMENT_SOURCE_CANDIDATES,
   normalizeRequirementSourcePath,
   type RequirementSourceCandidate,
 } from "./referenced-requirement-sources.ts";
@@ -56,8 +57,12 @@ function boundedResult(
   selections: TaskVerificationCriticalProofSourceSelection[],
   candidateOverflow: boolean,
 ): ReconciledCriticalProofState {
-  const boundedSelections = selections.slice(0, 8);
-  const overflow = candidateOverflow || obligations.length > MAX_EVIDENCE_CRITICAL_PROOF_OBLIGATIONS;
+  const boundedSelections = selections.slice(0, MAX_REQUIREMENT_SOURCE_CANDIDATES);
+  // A cited source beyond the selection ledger must block, not vanish.
+  const overflow =
+    candidateOverflow ||
+    selections.length > MAX_REQUIREMENT_SOURCE_CANDIDATES ||
+    obligations.length > MAX_EVIDENCE_CRITICAL_PROOF_OBLIGATIONS;
   return {
     obligations: obligations.slice(0, MAX_EVIDENCE_CRITICAL_PROOF_OBLIGATIONS),
     overflow: overflow || undefined,

@@ -252,15 +252,14 @@ describe("referenced requirement-source candidate extraction", () => {
 
   it("bounds candidate extraction and reports overflow separately", () => {
     const paths = Array.from({ length: MAX_REQUIREMENT_SOURCE_CANDIDATES + 6 }, (_, index) => `spec-${index}.md`);
-    const catalog = referencedRequirementCandidateCatalog([{ id: "user-1", text: paths.join(" ") }]);
+    const prompts = [{ id: "user-1", text: `Implement according to ${paths.join(", ")}.` }];
+    const catalog = referencedRequirementCandidateCatalog(prompts);
     expect(catalog.overflow).toBe(true);
     expect(catalog.candidates).toHaveLength(MAX_REQUIREMENT_SOURCE_CANDIDATES);
     expect(catalog.candidates.map((candidate) => candidate.path)).toEqual(
       paths.slice(0, MAX_REQUIREMENT_SOURCE_CANDIDATES),
     );
-    expect(prepareReferencedRequirementSources(".", [{ id: "user-1", text: paths.join(" ") }], [], [])).toContain(
-      "More than 8 requirement-source candidates were referenced",
-    );
+    expect(prepareReferencedRequirementSources(".", prompts, [], [])).toContain("The user cited more than 8");
   });
 });
 async function setup(

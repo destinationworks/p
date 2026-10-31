@@ -1,4 +1,5 @@
 import { parse } from "yaml";
+import { parseFlatPlainScalarMapping } from "./frontmatter-plain-scalar-fallback.ts";
 
 type ParsedFrontmatter<T extends Record<string, unknown>> = {
   frontmatter: T;
@@ -25,6 +26,18 @@ const extractFrontmatter = (content: string): { yamlString: string | null; body:
   };
 };
 
+// Strict YAML first. If it rejects the block, retry only for flat `key: value` frontmatter whose plain
+// values contain `: ` (other harnesses load those); anything else rethrows the original YAML error.
+const parseYaml = (yamlString: string): unknown => {
+  try {
+    return parse(yamlString);
+  } catch (error) {
+    const lenient = parseFlatPlainScalarMapping(yamlString);
+    if (lenient === undefined) throw error;
+    return lenient;
+  }
+};
+
 export const parseFrontmatter = <T extends Record<string, unknown> = Record<string, unknown>>(
   content: string,
 ): ParsedFrontmatter<T> => {
@@ -32,8 +45,7 @@ export const parseFrontmatter = <T extends Record<string, unknown> = Record<stri
   if (!yamlString) {
     return { frontmatter: {} as T, body };
   }
-  const parsed = parse(yamlString);
-  return { frontmatter: (parsed ?? {}) as T, body };
+  return { frontmatter: (parseYaml(yamlString) ?? {}) as T, body };
 };
 
 export const stripFrontmatter = (content: string): string => parseFrontmatter(content).body;

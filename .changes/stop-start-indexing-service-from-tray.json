@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "packages": ["coding-agent"],
+  "type": "Added",
+  "summary": "Stop and start the indexing service from the menu-bar and system-tray menu to free memory on demand, and build the tray menu from cached state so it opens without blocking on disk or launchctl."
+}

@@ -201,7 +201,7 @@ export class QdrantServerManager {
     const configPath = path.join(this.options.dataDirectory, "config.yaml");
     const apiKey = this.ensureApiKey();
     const content = [
-      "log_level: INFO",
+      "log_level: WARN",
       "storage:",
       `  storage_path: ${JSON.stringify(storagePath)}`,
       "service:",

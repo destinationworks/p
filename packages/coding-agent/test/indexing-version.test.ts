@@ -34,6 +34,7 @@ function populateMockFiles(root: string): void {
     ["scripts/central-install-snapshot.js", "export const snapshot = true;\n"],
     ["scripts/central-install-transaction.sh", "run_transaction() { :; }\n"],
     ["scripts/indexing-qdrant-assets.js", "export const qdrant = true;\n"],
+    ["scripts/indexing-service-log-archive.js", "export const archive = true;\n"],
     ["scripts/indexing-reinstall-lock.js", "export const lock = true;\n"],
     ["scripts/indexing-reinstall-transaction.sh", "begin_transaction() { :; }\n"],
     ["scripts/indexing-device-selection.sh", "select_indexing_device() { :; }\n"],
@@ -87,6 +88,7 @@ describe("computeIndexingVersion", () => {
   it.each([
     "packages/coding-agent/dist/core/indexing-service.js",
     "scripts/indexing-qdrant-assets.js",
+    "scripts/indexing-service-log-archive.js",
     "scripts/indexing-reinstall-lock.js",
     "scripts/indexing-reinstall-transaction.sh",
     "scripts/install-indexing-service.js",
