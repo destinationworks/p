@@ -44,9 +44,17 @@ export function getFinalResponseAssistantMessages(messages: readonly AgentMessag
 }
 
 export function assistantMessagesText(messages: readonly AssistantMessage[]): string {
-  return messages
-    .flatMap((message) => message.content.filter((content) => content.type === "text").map((content) => content.text))
-    .join("");
+  let result = "";
+  for (let i = 0; i < messages.length; i++) {
+    const content = messages[i].content;
+    for (let j = 0; j < content.length; j++) {
+      const part = content[j];
+      if (part && part.type === "text") {
+        result += part.text;
+      }
+    }
+  }
+  return result;
 }
 
 function findLastFinishWorkResultIndex(messages: readonly AgentMessage[]): number {
