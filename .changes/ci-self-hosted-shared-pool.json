@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "packages": ["coding-agent"],
+  "type": "None",
+  "reason": "CI-only: restrict self-hosted CI to trusted commits and enable shared Linux runner pool."
+}
