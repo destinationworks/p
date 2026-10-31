@@ -14,5 +14,3 @@ export const FILE_PATTERNS: Record<ResourceType, RegExp> = {
   prompts: /\.md$/,
   themes: /\.json$/,
 };
-
-export const IGNORE_FILE_NAMES = [".gitignore", ".ignore", ".fdignore"];

@@ -2,11 +2,12 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
 import ignore from "ignore";
 import type { Minimatch } from "minimatch";
+import { addIgnoreRules } from "../ignore-file-patterns.ts";
 import { FILE_PATTERNS } from "./constants.ts";
 import { resolveExtensionEntries } from "./dependency-scanning.ts";
 import { collectFiles, collectSkillEntries } from "./package-installation.ts";
 import type { ResourceType } from "./types.ts";
-import { addIgnoreRules, toPosixPath } from "./version-resolution.ts";
+import { toPosixPath } from "./version-resolution.ts";
 
 export function collectAutoExtensionEntries(dir: string): string[] {
   const entries: string[] = [];
