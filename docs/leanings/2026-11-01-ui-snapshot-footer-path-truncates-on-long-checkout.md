@@ -1,0 +1,22 @@
+# 2026-11-01 — UI snapshot tests fail when the checkout path truncates the footer cwd
+
+- **Status:** Resolved
+- **Task/context:** CI for PR #185 (Shift+Enter new-line notice) failed four `test/interactive-ui-regression.test.ts` snapshots (`01-startup-viewport` to `04-modal-selector-viewport`) on the self-hosted runner, while the full suite otherwise passed.
+- **Unexpected observation or failure:** The first suspicion was that the new startup notice had leaked into the E2E viewport. The CI diff showed otherwise: only the footer cwd line differed in every snapshot.
+- **Evidence:** CI rendered `/home/gh-runner/actions-runner-destinationworks/_work/p/p/packages/coding-age...` where the snapshot expects `~/dev/p/packages/coding-agent (main)`. The checkout path plus `/packages/coding-agent` is 79 characters, the footer adds ` (<branch>)`, and the 80-column viewport truncates the line inside the path. `sanitizeUIOutput` only rewrote complete `<prefix>/packages/coding-agent` text and a branch truncated after the path, so the truncated path survived. The interactive-mode `run()` loop, where the notice is started, is never called by the harness, and `VirtualTerminal` has no keyboard-protocol negotiation, so the notice cannot appear there. Local reproduction: a throwaway test that `chdir`s into `<tmp>/actions-runner-destinationworks/_work/p/p/packages/coding-agent` (with `git init -b main`) before `createUIRegressionHarness` failed with the same single-line diff, and passes after the fix.
+- **Approaches tried:**
+  - **Attempt:** Regenerate the four snapshots with `UPDATE_SNAPSHOTS=1`.
+    - **Outcome:** Rejected.
+    - **Why:** The snapshots were correct; baking one runner's path into them would break every other checkout location.
+  - **Attempt:** Suppress the notice for the virtual terminal.
+    - **Outcome:** Not needed.
+    - **Why:** It is already absent there (no negotiation method, kitty reported active); an end-to-end regression now asserts the viewport is unchanged.
+  - **Attempt:** Make the sanitizer rewrite a whole footer path line that ends in the truncation ellipsis.
+    - **Outcome:** Worked.
+    - **Why:** It matches only lines that start with `/` or `~`, contain no whitespace and end with `...`, so unrelated truncated text is untouched (covered by tests).
+- **Root cause:** The sanitizer assumed the cwd is never truncated inside the path, which holds only while the checkout path plus `/packages/coding-agent` and the branch suffix fits in the 80-column viewport.
+- **Resolution:** `sanitizeUIOutput` in `packages/coding-agent/test/helpers/ui-visual-snapshot-harness.ts` normalises a footer line truncated inside the path.
+- **Verification:** `ui-visual-snapshot-sanitization.test.ts` cases for the exact CI string, earlier truncation points and lines that must not be rewritten; the throwaway long-path reproduction before and after; `interactive-ui-regression.test.ts` unchanged and passing.
+- **Prevention/follow-up:** When a snapshot diff appears in CI, read the actual diff before blaming the change under review. Snapshot sanitizers must tolerate environment-dependent path lengths. Related: `2026-10-31-shift-enter-hint-needs-settled-keyboard-negotiation.md`.
+- **Reusable learning:** Any rendered path is subject to width truncation, so sanitize the truncated forms too, not only the full path.
+- **References:** PR #185, CI run 41279130084, `packages/coding-agent/test/helpers/ui-visual-snapshot-harness.ts`, `packages/coding-agent/test/ui-visual-snapshot-sanitization.test.ts`, `packages/coding-agent/test/interactive-ui-newline-hint.test.ts`.
