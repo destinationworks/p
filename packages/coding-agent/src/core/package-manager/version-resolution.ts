@@ -1,9 +1,8 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, relative, sep } from "node:path";
+import { join, sep } from "node:path";
 import { valid, validRange } from "semver";
-import { IGNORE_FILE_NAMES } from "./constants.ts";
-import type { IgnoreMatcher, PathMetadata } from "./types.ts";
+import type { PathMetadata } from "./types.ts";
 
 export function getEnv(): NodeJS.ProcessEnv {
   if (process.platform !== "linux" || Object.keys(process.env).length > 0) {
@@ -57,49 +56,6 @@ export function getExtensionTempFolder(agentDir: string): string {
   mkdirSync(tempFolder, { recursive: true, mode: 0o700 });
   chmodSync(tempFolder, 0o700);
   return tempFolder;
-}
-
-export function prefixIgnorePattern(line: string, prefix: string): string | null {
-  const trimmed = line.trim();
-  if (!trimmed) return null;
-  if (trimmed.startsWith("#") && !trimmed.startsWith("\\#")) return null;
-
-  let pattern = line;
-  let negated = false;
-
-  if (pattern.startsWith("!")) {
-    negated = true;
-    pattern = pattern.slice(1);
-  } else if (pattern.startsWith("\\!")) {
-    pattern = pattern.slice(1);
-  }
-
-  if (pattern.startsWith("/")) {
-    pattern = pattern.slice(1);
-  }
-
-  const prefixed = prefix ? `${prefix}${pattern}` : pattern;
-  return negated ? `!${prefixed}` : prefixed;
-}
-
-export function addIgnoreRules(ig: IgnoreMatcher, dir: string, rootDir: string): void {
-  const relativeDir = relative(rootDir, dir);
-  const prefix = relativeDir ? `${toPosixPath(relativeDir)}/` : "";
-
-  for (const filename of IGNORE_FILE_NAMES) {
-    const ignorePath = join(dir, filename);
-    if (!existsSync(ignorePath)) continue;
-    try {
-      const content = readFileSync(ignorePath, "utf-8");
-      const patterns = content
-        .split(/\r?\n/)
-        .map((line) => prefixIgnorePattern(line, prefix))
-        .filter((line): line is string => Boolean(line));
-      if (patterns.length > 0) {
-        ig.add(patterns);
-      }
-    } catch {}
-  }
 }
 
 export function isPattern(s: string): boolean {

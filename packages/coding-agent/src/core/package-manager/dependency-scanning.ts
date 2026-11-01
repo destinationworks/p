@@ -1,9 +1,10 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import ignore from "ignore";
+import { addIgnoreRules } from "../ignore-file-patterns.ts";
 import { findGitRepoRoot } from "./package-installation.ts";
 import type { PiManifest } from "./types.ts";
-import { addIgnoreRules, toPosixPath } from "./version-resolution.ts";
+import { toPosixPath } from "./version-resolution.ts";
 
 export function collectAncestorAgentsSkillDirs(startDir: string): string[] {
   const skillDirs: string[] = [];
