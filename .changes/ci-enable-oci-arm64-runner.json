@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "packages": ["coding-agent"],
+  "type": "None",
+  "reason": "CI-only: expand self-hosted Linux runner pool to include verified ARM64 OCI runners."
+}
