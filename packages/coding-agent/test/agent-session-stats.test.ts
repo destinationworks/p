@@ -3,6 +3,7 @@ import { type AssistantMessage, getModel, type ToolResultMessage, type Usage } f
 import { describe, expect, it } from "vitest";
 import { AgentSession } from "../src/core/agent-session.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";
+import { estimateContextTokens } from "../src/core/compaction/index.ts";
 import { ModelRegistry } from "../src/core/model-registry.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
@@ -107,6 +108,11 @@ function syncAgentMessages(session: AgentSession, sessionManager: SessionManager
   session.agent.state.messages = sessionManager.buildSessionContext().messages;
 }
 
+function expectEstimatedContextUsage(session: AgentSession): void {
+  const e = estimateContextTokens(session.agent.state.messages, session.systemPrompt, { useProviderUsage: false });
+  expect(session.getContextUsage()?.tokens).toBe(e.tokens - e.staticTokens);
+}
+
 describe("AgentSession.getSessionStats", () => {
   it("exposes the current context usage alongside token totals", () => {
     const { session, sessionManager } = createSession();
@@ -118,9 +124,9 @@ describe("AgentSession.getSessionStats", () => {
 
       const stats = session.getSessionStats();
       expect(stats.contextUsage).toEqual(session.getContextUsage());
-      expect(stats.contextUsage?.tokens).toBe(200);
+      expectEstimatedContextUsage(session);
       expect(stats.contextUsage?.contextWindow).toBe(model.contextWindow);
-      expect(stats.contextUsage?.percent).toBe((200 / model.contextWindow) * 100);
+      expect(stats.contextUsage?.percent).toBe(((stats.contextUsage?.tokens ?? 0) / model.contextWindow) * 100);
     } finally {
       session.dispose();
     }
@@ -134,7 +140,6 @@ describe("AgentSession.getSessionStats", () => {
       sessionManager.appendMessage(createAssistantMessage("response1", 180_000, 100));
       const keptUserId = sessionManager.appendMessage(createUserMessage("second", 200));
       sessionManager.appendMessage(createAssistantMessage("response2", 195_000, 300));
-      // appendCompaction uses Date.now() internally, which is > BASE_TIME + 300
       sessionManager.appendCompaction("summary", keptUserId, 195_000);
       sessionManager.appendMessage(createUserMessage("third", 400));
       syncAgentMessages(session, sessionManager);
@@ -149,7 +154,7 @@ describe("AgentSession.getSessionStats", () => {
     }
   });
 
-  it("uses post-compaction usage for current context instead of stale kept usage", () => {
+  it("keeps post-compaction provider usage out of current context pressure", () => {
     const { session, sessionManager } = createSession();
 
     try {
@@ -157,18 +162,16 @@ describe("AgentSession.getSessionStats", () => {
       sessionManager.appendMessage(createAssistantMessage("response1", 180_000, 100));
       const keptUserId = sessionManager.appendMessage(createUserMessage("second", 200));
       sessionManager.appendMessage(createAssistantMessage("response2", 195_000, 300));
-      // appendCompaction uses Date.now() internally
       sessionManager.appendCompaction("summary", keptUserId, 195_000);
       sessionManager.appendMessage(createUserMessage("third", 400));
-      // response3 timestamp must be after the compaction entry's Date.now()
       sessionManager.appendMessage(createAssistantMessage("response3", 25_000, Date.now() - BASE_TIME + 1_000));
       syncAgentMessages(session, sessionManager);
 
       const stats = session.getSessionStats();
       expect(stats.tokens.input).toBe(220_000);
       expect(stats.contextUsage).toBeDefined();
-      expect(stats.contextUsage?.tokens).toBe(25_000);
-      expect(stats.contextUsage?.percent).toBe((25_000 / model.contextWindow) * 100);
+      expectEstimatedContextUsage(session);
+      expect(stats.contextUsage?.percent).toBe(((stats.contextUsage?.tokens ?? 0) / model.contextWindow) * 100);
     } finally {
       session.dispose();
     }
@@ -291,22 +294,16 @@ describe("AgentSession.getSessionStats", () => {
       sessionManager.appendMessage(createAssistantMessage("response1", 180_000, 100));
       const keptUserId = sessionManager.appendMessage(createUserMessage("second", 200));
       sessionManager.appendMessage(createAssistantMessage("response2", 195_000, 300));
-      // appendCompaction uses Date.now() internally
       sessionManager.appendCompaction("summary", keptUserId, 195_000);
       sessionManager.appendMessage(createUserMessage("third", 400));
-      // Simulate the state at message_end time: agent.state.messages is up-to-date
-      // but sessionManager does NOT yet have the post-compaction assistant entry.
-      // response3 timestamp must be after the compaction entry's Date.now().
       const postCompactionAssistant = createAssistantMessage("response3", 25_000, Date.now() - BASE_TIME + 1_000);
       const agentMessages = sessionManager.buildSessionContext().messages;
       agentMessages.push(postCompactionAssistant);
       session.agent.state.messages = agentMessages;
-      // sessionManager intentionally does NOT have response3 yet (pre-appendMessage state)
-
       const usage = session.getContextUsage();
       expect(usage).toBeDefined();
-      expect(usage?.tokens).toBe(25_000);
-      expect(usage?.percent).toBe((25_000 / model.contextWindow) * 100);
+      expectEstimatedContextUsage(session);
+      expect(usage?.percent).toBe(((usage?.tokens ?? 0) / model.contextWindow) * 100);
     } finally {
       session.dispose();
     }

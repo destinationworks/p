@@ -425,7 +425,7 @@
   },
   "packages/coding-agent/test/agent-session-real-mini-pc-compaction.test.ts": {
     "classes": 0,
-    "lines": 370
+    "lines": 346
   },
   "packages/coding-agent/test/agent-session-real-state-update.test.ts": {
     "classes": 0,
@@ -437,7 +437,7 @@
   },
   "packages/coding-agent/test/agent-session-stats.test.ts": {
     "classes": 0,
-    "lines": 314
+    "lines": 311
   },
   "packages/coding-agent/test/agent-session-tree-navigation.test.ts": {
     "classes": 0,
@@ -565,7 +565,7 @@
   },
   "packages/coding-agent/test/suite/agent-session-compaction.test.ts": {
     "classes": 0,
-    "lines": 1327
+    "lines": 1313
   },
   "packages/coding-agent/test/suite/agent-session-model-extension.test.ts": {
     "classes": 0,

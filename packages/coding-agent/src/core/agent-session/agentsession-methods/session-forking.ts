@@ -1,7 +1,7 @@
 import type { AgentMessage } from "@dst0/p-agent-core";
 import type { AssistantMessage } from "@dst0/p-ai";
 import { getThemeByName, theme } from "../../../modes/interactive/theme/theme.ts";
-import { createContextBudgetReport, estimateContextTokens } from "../../compaction/index.ts";
+import { createContextBudgetReport } from "../../compaction/index.ts";
 import { exportSessionToHtml, type ToolHtmlRenderer } from "../../export-html/index.ts";
 import { createToolHtmlRenderer } from "../../export-html/tool-renderer.ts";
 import type { ContextUsage } from "../../extensions/index.ts";
@@ -105,11 +105,8 @@ export function do_getContextUsage(self: AgentSession): ContextUsage | undefined
   const settings = self.settingsManager.getCompactionSettings();
   const effectiveMessages = self._getEffectiveCompactedMessages();
   const promptContext = self._preparePromptContext(effectiveMessages);
-  const providerEstimate = estimateContextTokens(promptContext.messages, self.systemPrompt, {
-    sinceTimestamp: self._getLatestCompactionTimestamp(),
-  });
-  const estimate = providerEstimate.lastUsageIndex === null ? promptContext.budgetEstimate : providerEstimate;
-  const source = providerEstimate.lastUsageIndex === null ? promptContext.source : "provider_usage";
+  const estimate = promptContext.budgetEstimate;
+  const source = promptContext.source;
   const budget = createContextBudgetReport(promptContext.budgetEstimate.tokens, contextWindow, settings);
   const contextTokens =
     estimate.lastUsageIndex === null
