@@ -151,6 +151,14 @@ describe("tray launchd job", () => {
       expect(fs.readFileSync(job.plistPath, "utf8")).toBe(moved);
     });
 
+    it("by default blocks between polls, so the daemon really gives launchd time to drop the old job", () => {
+      const launchctl = fakeLaunchctl({ print: [{ status: 0 }] });
+      const startedAt = performance.now();
+      expect(startTrayLaunchdJob(job, plistFor(), launchctl.run)).toBe(true);
+      expect(performance.now() - startedAt).toBeGreaterThanOrEqual(90);
+      expect(launchctl.subcommands()).toEqual(["bootout", "print", "print", "bootstrap"]);
+    });
+
     it("bounds the wait for a job launchd keeps reporting and still attempts the bootstrap", () => {
       const launchctl = fakeLaunchctl({ print: { status: 0 } });
       let slept = 0;
@@ -202,6 +210,17 @@ describe("tray launchd job", () => {
   });
 
   describe("runLaunchctl", () => {
+    it.skipIf(process.platform === "darwin")(
+      "reports no status where launchctl does not exist, which callers treat as failure",
+      () => {
+        expect(runLaunchctl(["print", "gui/0/com.dst.p.code-index-tray.test-never-loaded"])).toEqual({
+          status: null,
+          stdout: "",
+          stderr: "",
+        });
+      },
+    );
+
     it.skipIf(process.platform !== "darwin")(
       "reports launchctl's own exit status for an unknown job (read-only)",
       () => {
