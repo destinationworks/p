@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "packages": ["coding-agent"],
+  "type": "Fixed",
+  "summary": "The macOS and Linux indexing trays now show indexing progress: a repository the daemon reports as initializing or updating gets the indexing indicator, tooltip and status line with the current phase or percentage instead of being labelled Ready, and Linux labels queued repositories Queued."
+}

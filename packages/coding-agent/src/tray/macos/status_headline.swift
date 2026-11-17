@@ -31,21 +31,33 @@ func statusHeadline(_ input: StatusHeadlineInput) -> String {
     return input.stale ? base + " (refreshing...)" : base
 }
 
+/// `RepositoryServiceStatus.state` values the daemon writes while it refreshes a repository.
+let indexingRepoStates: Set<String> = ["initializing", "updating"]
+
+func isRepoIndexing(_ repo: RepoStatusEntry) -> Bool {
+    return indexingRepoStates.contains(repo.state)
+}
+
+/// Only the indexing phase reports overall progress: "preparing" can reach 100% before any chunk is
+/// indexed and "finalizing" restarts at 0%, so those phases are named instead of given a percent.
+func indexingProgressLabel(_ progress: RepoProgress?) -> String? {
+    guard let phase = progress?.phase else { return nil }
+    guard phase == "indexing" else { return phase }
+    return progress?.percent.map { "\(Int($0))%" }
+}
+
 private func runningHeadline(_ status: IndexingStatusData?) -> String {
-    guard let active = status?.repos.first(where: { $0.state == "indexing" }) else {
+    guard let active = status?.repos.first(where: isRepoIndexing) else {
         return "Status: Ready (Idle)"
     }
     let repoName = URL(fileURLWithPath: active.path).lastPathComponent
-    let pct = active.progress?.percent.map { "\(Int($0))%" } ?? "in progress"
-    return "Status: Indexing \(repoName) (\(pct))"
+    return "Status: Indexing \(repoName) (\(indexingProgressLabel(active.progress) ?? "in progress"))"
 }
 
 func repoStateDescription(_ repo: RepoStatusEntry, serviceRunning: Bool) -> String {
     if !serviceRunning { return "Stopped (\(repo.indexedFiles) files)" }
+    if isRepoIndexing(repo) { return "Indexing" + (indexingProgressLabel(repo.progress).map { " [\($0)]" } ?? "") }
     switch repo.state {
-    case "indexing":
-        let pct = repo.progress?.percent.map { " [\(Int($0))%]" } ?? ""
-        return "Indexing\(pct)"
     case "error": return "Error"
     case "queued": return "Queued"
     default: return "Ready (\(repo.indexedFiles) files)"
@@ -61,12 +73,12 @@ struct TrayButtonAppearance {
 
 func trayButtonAppearance(service: ServiceState, processRunning: Bool, status: IndexingStatusData?) -> TrayButtonAppearance {
     let serviceRunning = service != .notLoaded && processRunning
-    let indexingRepo = serviceRunning ? status?.repos.first { $0.state == "indexing" } : nil
+    let indexingRepo = serviceRunning ? status?.repos.first(where: isRepoIndexing) : nil
     let anyError = serviceRunning && (status?.repos.contains { $0.state == "error" } ?? false)
     let toolTip: String
     if let repo = indexingRepo {
-        let pct = repo.progress?.percent.map { " (\(Int($0))%)" } ?? ""
-        toolTip = "Indexing: \(URL(fileURLWithPath: repo.path).lastPathComponent)\(pct)"
+        let label = indexingProgressLabel(repo.progress).map { " (\($0))" } ?? ""
+        toolTip = "Indexing: \(URL(fileURLWithPath: repo.path).lastPathComponent)\(label)"
     } else if service == .notLoaded {
         toolTip = "P Code Indexing (Stopped)"
     } else {

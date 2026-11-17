@@ -22,6 +22,7 @@ from indexing_tray_status import (
     repo_state_description,
     request_priority,
     status_line,
+    tooltip_text,
 )
 
 
@@ -100,16 +101,7 @@ class IndexingTrayApp:
 
     def on_timer_tick_fallback(self, status_icon) -> bool:
         self.service.refresh_async()
-        status_data = read_json_file(self.status_file)
-        running = is_daemon_running(status_data, self.service.state)
-        repos = status_data.get("repos", [])
-        is_indexing = any(r.get("state") == "indexing" for r in repos)
-        if not running:
-            status_icon.set_tooltip_text("P Code Indexing (Stopped)")
-        elif is_indexing:
-            status_icon.set_tooltip_text("P Code Indexing (Indexing...)")
-        else:
-            status_icon.set_tooltip_text("P Code Indexing (Idle)")
+        status_icon.set_tooltip_text(tooltip_text(read_json_file(self.status_file), self.service.state))
         return True
 
     def rebuild_menu(self, Gtk) -> None:

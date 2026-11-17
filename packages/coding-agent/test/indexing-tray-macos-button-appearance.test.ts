@@ -17,7 +17,9 @@ describe.skipIf(!canCompileTrayLogic)("macOS tray button appearance (compiled Sw
       one({ kind: "buttonAppearance", service, processRunning, status: statusData });
 
     it("shows the indexing dot and progress for a live daemon, idle otherwise", () => {
-      expect(appearance("loaded", true, status("indexing", { progress: { percent: 42.9 } }))).toEqual({
+      expect(
+        appearance("loaded", true, status("updating", { progress: { phase: "indexing", percent: 42.9 } })),
+      ).toEqual({
         isIndexing: true,
         isError: false,
         toolTip: "Indexing: alpha (42%)",
@@ -31,12 +33,12 @@ describe.skipIf(!canCompileTrayLogic)("macOS tray button appearance (compiled Sw
 
     it("marks a repository error, a stopped service, and a service that has not started yet", () => {
       expect(appearance("loaded", true, status("error"))).toMatchObject({ isError: true });
-      expect(appearance("notLoaded", true, status("indexing"))).toEqual({
+      expect(appearance("notLoaded", true, status("updating"))).toEqual({
         isIndexing: false,
         isError: true,
         toolTip: "P Code Indexing (Stopped)",
       });
-      expect(appearance("loaded", false, status("indexing"))).toEqual({
+      expect(appearance("loaded", false, status("updating"))).toEqual({
         isIndexing: false,
         isError: false,
         toolTip: "P Code Indexing (Starting)",
@@ -50,7 +52,7 @@ describe.skipIf(!canCompileTrayLogic)("macOS tray button appearance (compiled Sw
         status: statusData,
       });
       const tick = (percent: number, updatedAt: string) =>
-        state("loaded", true, status("indexing", { progress: { percent }, updatedAt }));
+        state("loaded", true, status("updating", { progress: { phase: "indexing", percent }, updatedAt }));
       const updates = (shown: Json | undefined, next: Json) => one({ kind: "buttonUpdates", shown, next });
 
       it("draws both icon and tooltip the first time", () => {

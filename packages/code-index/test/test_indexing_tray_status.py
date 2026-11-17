@@ -21,7 +21,7 @@ def status(running=True, state="ready", progress=None):
 
 class IndexingTrayStatusTest(unittest.TestCase):
     def test_inactive_unit_overrides_a_stale_running_status_file(self):
-        data = status(running=True, state="indexing", progress={"percent": 42})
+        data = status(running=True, state="updating", progress={"phase": "indexing", "percent": 42})
         self.assertFalse(st.is_daemon_running(data, STATE_INACTIVE))
         self.assertEqual(st.status_line(data, STATE_INACTIVE), "  Status: Stopped")
 
@@ -34,17 +34,49 @@ class IndexingTrayStatusTest(unittest.TestCase):
         self.assertEqual(st.status_line(status(running=False), STATE_UNKNOWN), "  Status: Stopped")
 
     def test_indexing_progress_and_stale_marker(self):
-        data = status(state="indexing", progress={"percent": 42.9})
+        data = status(state="updating", progress={"phase": "indexing", "percent": 42.9})
         self.assertEqual(st.status_line(data, STATE_ACTIVE), "  Status: Indexing alpha (42%)")
         self.assertEqual(
-            st.status_line(status(state="indexing"), STATE_ACTIVE, stale=True),
+            st.status_line(status(state="initializing"), STATE_ACTIVE, stale=True),
             "  Status: Indexing alpha (refreshing...)")
 
+    def test_only_the_states_written_during_a_refresh_count_as_indexing(self):
+        # The daemon writes initializing/updating while it refreshes; it never writes "indexing".
+        for state in ("initializing", "updating"):
+            self.assertTrue(st.is_repo_indexing({"state": state}), state)
+        for state in ("indexing", "ready", "stale", "partial", "queued", "error", None):
+            self.assertFalse(st.is_repo_indexing({"state": state}), state)
+        self.assertFalse(st.is_repo_indexing({}))
+
+    def test_progress_label_shows_a_percent_only_in_the_indexing_phase(self):
+        def label(progress):
+            return st.indexing_progress_label({"state": "updating", "progress": progress})
+
+        self.assertEqual(label({"phase": "indexing", "percent": 42.9}), "42%")
+        self.assertEqual(label({"phase": "indexing", "percent": 0}), "0%")
+        self.assertEqual(label({"phase": "preparing", "percent": 100}), "preparing")
+        self.assertEqual(label({"phase": "finalizing", "percent": 0}), "finalizing")
+        self.assertIsNone(label({"phase": "indexing"}))
+        self.assertIsNone(label({"percent": 42}))
+        self.assertIsNone(label("garbled"))
+        self.assertIsNone(st.indexing_progress_label({"state": "updating"}))
+
+    def test_tooltip_follows_the_daemon_and_its_repositories(self):
+        updating = status(state="updating", progress={"phase": "scanning", "percent": 3})
+        self.assertEqual(st.tooltip_text(updating, STATE_ACTIVE), "P Code Indexing (Indexing...)")
+        self.assertEqual(st.tooltip_text(status(state="ready"), STATE_ACTIVE), "P Code Indexing (Idle)")
+        self.assertEqual(st.tooltip_text(updating, STATE_INACTIVE), "P Code Indexing (Stopped)")
+        self.assertEqual(st.tooltip_text(status(running=False, state="updating"), STATE_UNKNOWN),
+                         "P Code Indexing (Stopped)")
+        self.assertEqual(st.tooltip_text({"running": True}, STATE_ACTIVE), "P Code Indexing (Idle)")
+
     def test_repo_descriptions(self):
-        repo = {"state": "indexing", "indexedFiles": 7}
+        repo = {"state": "updating", "indexedFiles": 7, "progress": {"phase": "indexing", "percent": 42.9}}
         self.assertEqual(st.repo_state_description(repo, False), "Stopped (7 files)")
-        self.assertEqual(st.repo_state_description(repo, True), "Indexing")
+        self.assertEqual(st.repo_state_description(repo, True), "Indexing [42%]")
+        self.assertEqual(st.repo_state_description({"state": "initializing"}, True), "Indexing")
         self.assertEqual(st.repo_state_description({"state": "error"}, True), "Error")
+        self.assertEqual(st.repo_state_description({"state": "queued", "indexedFiles": 3}, True), "Queued")
         self.assertEqual(st.repo_state_description({"state": "ready", "indexedFiles": 3}, True), "Ready (3 files)")
 
     def test_read_json_file_tolerates_missing_invalid_and_non_object(self):

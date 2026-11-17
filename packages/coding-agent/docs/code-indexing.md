@@ -201,6 +201,8 @@ The macOS tray survives a Stop so it can offer Start: it ignores the `SIGTERM` t
 
 The menu is built from in-memory state only. The tray reads its JSON files, probes `launchctl print` (or `systemctl --user is-active`), and checks the plist on background queues every two seconds, so opening the menu never waits on disk or a subprocess. The menu-bar icon and tooltip are reassigned only when they change, because every assignment re-renders the item in the system menu bar. State older than ten seconds is shown with "(refreshing...)".
 
+Both trays treat a repository as indexing while the daemon reports it as `initializing` or `updating`, the states it writes from the moment a refresh starts until it ends; the status file has no `indexing` state. During that time the macOS item shows the indexing dot, the tooltip and status line name the repository, and the repository entry reads `Indexing`. Like the footer, the trays show a percentage only in the `indexing` phase and name the `scanning`, `preparing` and `finalizing` phases instead, because those phases do not report overall progress. A `queued` repository is labelled `Queued` and a failed one `Error`.
+
 ## Local files and processes
 
 With the default agent directory, indexing state is stored under `~/.p/agent`:
