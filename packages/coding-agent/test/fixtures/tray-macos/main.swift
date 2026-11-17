@@ -67,6 +67,23 @@ func handle(_ request: [String: Any]) -> Any {
         return serviceFailureMessage(
             operation: operation, exitCode: code, stderr: request["stderr"] as? String ?? "",
             timedOut: request["timedOut"] as? Bool ?? false)
+    case "buttonAppearance":
+        let appearance = trayButtonAppearance(
+            service: serviceStateFromName(request["service"] as? String ?? ""),
+            processRunning: request["processRunning"] as? Bool ?? false,
+            status: decodeStatus(request["status"]))
+        return ["isIndexing": appearance.isIndexing, "isError": appearance.isError, "toolTip": appearance.toolTip]
+    case "buttonUpdates":
+        let decode = { (input: Any?) -> TrayButtonAppearance? in
+            guard let fields = input as? [String: Any] else { return nil }
+            return trayButtonAppearance(
+                service: serviceStateFromName(fields["service"] as? String ?? ""),
+                processRunning: fields["processRunning"] as? Bool ?? false,
+                status: decodeStatus(fields["status"]))
+        }
+        guard let next = decode(request["next"]) else { return "missing next" }
+        let updates = trayButtonUpdates(shown: decode(request["shown"]), next: next)
+        return ["image": updates.image, "toolTip": updates.toolTip]
     case "repoState":
         guard let repoJson = request["repo"],
               let data = try? JSONSerialization.data(withJSONObject: repoJson),

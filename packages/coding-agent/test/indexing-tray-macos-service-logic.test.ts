@@ -1,65 +1,16 @@
-import { spawnSync } from "node:child_process";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
+import {
+  canCompileTrayLogic,
+  type Json,
+  trayStatus as status,
+  useTrayLogicHarness,
+} from "./tray-macos-logic-test-harness.ts";
 
-// Compiles the real Swift decision logic (service_state.swift, status_headline.swift) with a
-// JSON driver and asserts on its answers, so the tray's state -> menu mapping is tested without AppKit.
+// Asserts on the real Swift decision logic (service_state.swift, status_headline.swift), so the
+// tray's state -> menu mapping is tested without AppKit.
 
-const SWIFTC = "/usr/bin/swiftc";
-const testDir = path.dirname(fileURLToPath(import.meta.url));
-const swiftDir = path.resolve(testDir, "..", "src", "tray", "macos");
-const harnessSource = path.join(testDir, "fixtures", "tray-macos", "main.swift");
-const canCompile = process.platform === "darwin" && fs.existsSync(SWIFTC);
-
-type Json = Record<string, unknown>;
-
-const status = (repoState: string, extra: Json = {}): Json => ({
-  pid: 4242,
-  running: true,
-  startedAt: "2026-10-31T00:00:00Z",
-  updatedAt: "2026-10-31T00:00:01Z",
-  repos: [
-    {
-      path: "/work/alpha",
-      state: repoState,
-      indexedFiles: 7,
-      indexedChunks: 70,
-      updatedAt: "2026-10-31T00:00:01Z",
-      ...extra,
-    },
-  ],
-});
-
-describe.skipIf(!canCompile)("macOS tray service toggle logic (compiled Swift)", () => {
-  let buildDir: string;
-  let binary: string;
-
-  const evaluate = (requests: Json[]): unknown[] => {
-    const run = spawnSync(binary, { input: JSON.stringify(requests), encoding: "utf8", timeout: 20_000 });
-    expect(run.status, run.stderr).toBe(0);
-    return JSON.parse(run.stdout) as unknown[];
-  };
-  const one = (request: Json): unknown => evaluate([request])[0];
-
-  beforeAll(() => {
-    buildDir = fs.mkdtempSync(path.join(os.tmpdir(), "p-tray-logic-"));
-    binary = path.join(buildDir, "tray-logic");
-    const sources = ["models.swift", "service_state.swift", "status_headline.swift"].map((name) =>
-      path.join(swiftDir, name),
-    );
-    const compile = spawnSync(SWIFTC, ["-Onone", ...sources, harnessSource, "-o", binary], {
-      encoding: "utf8",
-      timeout: 240_000,
-    });
-    expect(compile.status, compile.stderr).toBe(0);
-  }, 300_000);
-
-  afterAll(() => {
-    fs.rmSync(buildDir, { recursive: true, force: true });
-  });
+describe.skipIf(!canCompileTrayLogic)("macOS tray service toggle logic (compiled Swift)", () => {
+  const { one } = useTrayLogicHarness();
 
   describe("planServiceMenu", () => {
     it("offers Stop and enables the dependent controls while the service is loaded", () => {

@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "packages": ["coding-agent"],
+  "type": "Fixed",
+  "summary": "The macOS indexing menu-bar item opens its menu immediately under load: it now runs as its own Interactive launchd job instead of inheriting the indexing daemon's throttled scheduling, and redraws only when its icon or tooltip changes."
+}
