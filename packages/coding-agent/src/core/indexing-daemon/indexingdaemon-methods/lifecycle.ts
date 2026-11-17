@@ -15,12 +15,14 @@ export async function do_start(self: IndexingDaemon): Promise<void> {
   fs.mkdirSync(self.options.agentDir, { recursive: true, mode: 0o700 });
   self.daemonLock = acquireDaemonLock(self.options.agentDir);
   try {
+    // Only the lock holder owns the tray. Start it before Qdrant and the registry sync, which can
+    // take minutes after a restart; until the first status write it shows "Starting...".
+    self.trayManager.start();
     if (self.collectQdrantGarbageOnStart) await self.startQdrantMaintenance();
     self.watchRegistry();
     await self.syncRegistry();
     self.reconcileTimer = setInterval(() => void self.reconcile(), self.options.reconcileMs);
     self.resetEmbeddingIdleTimer();
-    self.trayManager.start();
     self.writeStatus();
   } catch (error) {
     try {
