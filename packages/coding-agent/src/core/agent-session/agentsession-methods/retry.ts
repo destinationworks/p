@@ -4,6 +4,7 @@ import { type BashResult, executeBashWithOperations } from "../../bash-executor.
 import { evaluateGuardrails } from "../../guardrails.ts";
 import { type BashOperations, createLocalBashOperations } from "../../tools/bash.ts";
 import type { AgentSession } from "../agentsession.ts";
+import { RETRY_CANCELLED_ERROR } from "../auto-retry-ledger.ts";
 import {
   MODEL_RECOVERY_BASE_DELAY_MS,
   MODEL_RECOVERY_MAX_RETRY_DELAY_MS,
@@ -60,7 +61,7 @@ export async function do__prepareRetry(self: AgentSession, message: AssistantMes
       type: "auto_retry_end",
       success: false,
       attempt,
-      finalError: "Retry cancelled",
+      finalError: RETRY_CANCELLED_ERROR,
     });
     return false;
   } finally {
