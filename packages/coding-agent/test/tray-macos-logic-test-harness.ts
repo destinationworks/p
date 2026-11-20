@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, expect } from "vitest";
 import type { RepositoryServiceState } from "./indexing-repository-service-states.ts";
 
-// Compiles the real Foundation-only Swift tray logic (models, service_state, status_headline) with the
+// Compiles the real Foundation-only Swift tray logic (models, service_state, status_headline, resource_usage) with the
 // JSON driver in fixtures/tray-macos/main.swift, so tray decisions are tested without AppKit.
 
 const SWIFTC = "/usr/bin/swiftc";
@@ -46,8 +46,8 @@ export function useTrayLogicHarness(): { evaluate: (requests: Json[]) => unknown
   beforeAll(() => {
     buildDir = fs.mkdtempSync(path.join(os.tmpdir(), "p-tray-logic-"));
     binary = path.join(buildDir, "tray-logic");
-    const sources = ["models.swift", "service_state.swift", "status_headline.swift"].map((name) =>
-      path.join(swiftDir, name),
+    const sources = ["models.swift", "service_state.swift", "status_headline.swift", "resource_usage.swift"].map(
+      (name) => path.join(swiftDir, name),
     );
     const compile = spawnSync(SWIFTC, ["-Onone", ...sources, harnessSource, "-o", binary], {
       encoding: "utf8",

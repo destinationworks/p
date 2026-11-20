@@ -7,7 +7,8 @@ func buildStatusMenu(
     headline: String,
     plan: ServiceMenuPlan,
     currentStatus: IndexingStatusData?,
-    currentConfig: CodeRagConfig?
+    currentConfig: CodeRagConfig?,
+    resourceItem: NSMenuItem?
 ) -> NSMenu {
     let menu = NSMenu()
     // Without this AppKit re-enables every item whose target responds to its action,
@@ -33,6 +34,11 @@ func buildStatusMenu(
     let deviceItem = NSMenuItem(title: "  Device: \(mode)", action: nil, keyEquivalent: "")
     deviceItem.isEnabled = false
     menu.addItem(deviceItem)
+
+    // 3b. CPU, memory and GPU of the daemon's process tree (sampled only while the menu is open)
+    if let resourceItem = resourceItem {
+        menu.addItem(resourceItem)
+    }
 
     menu.addItem(NSMenuItem.separator())
 

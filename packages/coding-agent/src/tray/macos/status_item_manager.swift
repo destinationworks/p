@@ -7,6 +7,7 @@ import Foundation
 // JSON decoding happen on the utility queues and are published back to the main thread.
 final class IndexingStatusItemManager: NSObject, NSMenuDelegate {
     static let serviceProbeInterval: TimeInterval = 5
+    static let resourceSampleInterval: TimeInterval = 1
 
     let statusItem: NSStatusItem
     let agentDir: String
@@ -15,6 +16,9 @@ final class IndexingStatusItemManager: NSObject, NSMenuDelegate {
     let fileQueue = DispatchQueue(label: "p.indexing-tray.files", qos: .utility)
     let serviceQueue = DispatchQueue(label: "p.indexing-tray.service", qos: .utility)
     let actionQueue = DispatchQueue(label: "p.indexing-tray.action", qos: .userInitiated)
+    // The user is watching the open menu, and a sample takes milliseconds: utility QoS left the
+    // first sample waiting for seconds on a heavily loaded host.
+    let resourceQueue = DispatchQueue(label: "p.indexing-tray.resources", qos: .userInitiated)
 
     // Main-thread-only cache.
     var files: FileSnapshot?
@@ -26,6 +30,13 @@ final class IndexingStatusItemManager: NSObject, NSMenuDelegate {
     private var serviceRefreshInFlight = false
     private var timer: Timer?
     private var fileSource: DispatchSourceFileSystemObject?
+    // Resource sampling runs only while the menu is open; the generation drops samples that were
+    // still in flight when the menu closed or reopened.
+    private var resourceSection: ResourceMenuSection?
+    private var resourceTimer: Timer?
+    private var lastResourceSample: ResourceSample?
+    private var resourceGeneration = 0
+    private var resourceRefreshInFlight = false
 
     init(agentDir: String) {
         self.agentDir = agentDir
@@ -43,6 +54,7 @@ final class IndexingStatusItemManager: NSObject, NSMenuDelegate {
 
     deinit {
         timer?.invalidate()
+        resourceTimer?.invalidate()
         fileSource?.cancel()
     }
 
@@ -102,6 +114,50 @@ final class IndexingStatusItemManager: NSObject, NSMenuDelegate {
         }
     }
 
+    func requestResourceRefresh() {
+        let generation = resourceGeneration
+        guard serviceRunning, let status = files?.status else {
+            lastResourceSample = nil
+            resourceSection?.update(usage: nil, serviceRunning: serviceRunning)
+            return
+        }
+        if resourceRefreshInFlight { return }
+        resourceRefreshInFlight = true
+        let rootPid = Int32(status.pid)
+        let startedAt = status.startedAt
+        let previous = lastResourceSample?.rootPid == rootPid ? lastResourceSample : nil
+        resourceQueue.async { [weak self] in
+            let sample = sampleIndexerResources(rootPid: rootPid, statusStartedAt: startedAt, previous: previous)
+            let usage = sample.map { computeResourceUsage(previous: previous, current: $0) } ?? unavailableResourceUsage
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.resourceRefreshInFlight = false
+                guard generation == self.resourceGeneration else { return }
+                self.lastResourceSample = sample
+                self.resourceSection?.update(usage: usage, serviceRunning: self.serviceRunning)
+            }
+        }
+    }
+
+    // .common mode: the default-mode timer above does not fire while AppKit tracks the open menu.
+    private func startResourceSampling() {
+        resourceTimer?.invalidate()
+        let timer = Timer(timeInterval: Self.resourceSampleInterval, repeats: true) { [weak self] _ in
+            self?.requestResourceRefresh()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        resourceTimer = timer
+        requestResourceRefresh()
+    }
+
+    private func stopResourceSampling() {
+        resourceTimer?.invalidate()
+        resourceTimer = nil
+        resourceSection = nil
+        lastResourceSample = nil
+        resourceGeneration += 1
+    }
+
     // Runs on fileQueue. A fresh descriptor is captured per source so a re-arm never closes the new one.
     private func armFileSource() {
         fileSource?.cancel()
@@ -155,14 +211,22 @@ final class IndexingStatusItemManager: NSObject, NSMenuDelegate {
         let headline = statusHeadline(StatusHeadlineInput(
             service: serviceState, processRunning: processRunning, status: files?.status,
             stale: cacheIsStale(now: now)))
+        stopResourceSampling()
+        resourceSection = ResourceMenuSection(
+            usage: nil, serviceRunning: serviceRunning, unifiedMemory: hostHasUnifiedMemory)
         let builtMenu = buildStatusMenu(
             target: self, running: serviceRunning, headline: headline, plan: plan,
-            currentStatus: files?.status, currentConfig: files?.config)
+            currentStatus: files?.status, currentConfig: files?.config, resourceItem: resourceSection?.item)
         for item in builtMenu.items {
             builtMenu.removeItem(item)
             menu.addItem(item)
         }
         requestFileRefresh()
         requestServiceRefresh(force: true)
+        startResourceSampling()
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        stopResourceSampling()
     }
 }
