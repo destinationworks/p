@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "packages": ["coding-agent"],
+  "type": "Added",
+  "summary": "Record each automatic retry decision (scheduled, recovered, exhausted, cancelled) as an `auto_retry` session entry so a session log shows whether a failed request was retried."
+}

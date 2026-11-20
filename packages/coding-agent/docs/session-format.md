@@ -257,6 +257,15 @@ Extension state persistence. Does NOT participate in LLM context.
 
 Use `customType` to identify your extension's entries on reload.
 
+p also writes built-in custom entries. `customType: "auto_retry"` records each automatic retry decision so a log shows whether a failed request was retried:
+
+```json
+{"type":"custom","customType":"auto_retry","data":{"version":1,"phase":"scheduled","attempt":1,"maxAttempts":3,"delayMs":2000,"reason":"transient","error":"Stream ended without finish_reason"}}
+{"type":"custom","customType":"auto_retry","data":{"version":1,"phase":"recovered","attempt":1}}
+```
+
+`phase` is `scheduled` (with `maxAttempts`, `delayMs`, `reason`), `recovered`, `exhausted`, or `cancelled` (the last two with `error`). Errors are truncated to 500 characters. A failed assistant message followed by no `auto_retry` entry was either not retryable or the process stopped before scheduling a retry.
+
 ### CustomMessageEntry
 
 Extension-injected messages that DO participate in LLM context.

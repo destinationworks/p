@@ -8,6 +8,7 @@ import {
   STRUCTURED_SESSION_STATE_CUSTOM_TYPE,
 } from "../../compaction/index.ts";
 import type { AgentSession } from "../agentsession.ts";
+import { persistAutoRetryEvent } from "../auto-retry-ledger.ts";
 import { MARK_SESSION_PROGRESS_TOOL_NAME, UPDATE_SESSION_STATE_TOOL_NAME } from "../constants.ts";
 import { getFinishWorkRemainingWork, getFinishWorkStatus, getOpenSessionStateItems } from "../message-utils.ts";
 import type { AgentSessionEvent } from "../session-types.ts";
@@ -55,6 +56,7 @@ export function do__getFinishWorkSessionStateBlockReason(self: AgentSession, arg
 }
 
 export function do__emit(self: AgentSession, event: AgentSessionEvent): void {
+  persistAutoRetryEvent(self.sessionManager, event);
   for (const l of self._eventListeners) {
     l(event);
   }

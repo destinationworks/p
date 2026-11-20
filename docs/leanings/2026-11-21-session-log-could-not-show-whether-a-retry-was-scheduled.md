@@ -1,0 +1,25 @@
+# 2026-11-21 — The session log could not show whether p retried a cut stream
+
+- **Status:** Partial
+- **Task/context:** Explaining why the 2026-11-18 strict-tier run (local `qwen3.8-27b` behind the LAN llm-orchestrator) ended unfinished after 45 minutes.
+- **Unexpected observation or failure:** The last JSONL entry is an assistant error, `Stream ended without finish_reason`, at 21:52:38Z. Nothing follows. The orchestrator log shows no further request from p that night, so p never retried, although the same run had recovered from `error decoding response body` 30 minutes earlier with a retry 6 s after the error.
+- **Evidence:**
+  - Orchestrator log, request c1aacf0c: accepted 21:49:57Z; at 21:51:52Z `Streaming client stopped consuming response; draining upstream without forwarding timeout_ms=5000`; upstream completed 21:54:21Z. The gateway stops forwarding to a client that leaves its socket unread for 5 s and ends the body without `finish_reason`.
+  - p lagged the server throughout the run: an assistant message was persisted 94 s after the server finished sending it, and plain `write`/`edit`/`read` tool turns took 8-405 s (two batches took 125 s each). The MacBook Air was heavily loaded that morning (the indexing daemon alone dirtied 2.1 GB in 2.3 h; mds, mediaanalysisd and coresymbolicationd diagnostics).
+  - `Stream ended without finish_reason` matches `RETRYABLE_ERROR_PATTERN`, is not a context overflow, and classifies as a plain transient retry for a LAN base URL.
+- **Approaches tried:**
+  - **Attempt:** Reproduce with the same installed build in an isolated agent dir under tmux, against a fake OpenAI-compatible server that ends the stream without `finish_reason`: first turn, and after tool turns following an earlier recovered retry.
+    - **Outcome:** Did not reproduce
+    - **Why:** p retried 1.6-1.7 s after each cut.
+  - **Attempt:** Resume a copy of the real session (real history) against a fake server that streams thinking plus an 8 KB `write` at 60 deltas/s and records socket backpressure.
+    - **Outcome:** Did not reproduce
+    - **Why:** p persisted the message at server end with zero backpressure, so p's own render/parse path keeps pace in a fast terminal.
+  - **Attempt:** Read the JSONL for the retry decision.
+    - **Outcome:** Did not work
+    - **Why:** `auto_retry_start`/`auto_retry_end` were UI events only and were never persisted, so the log cannot distinguish "not scheduled", "scheduled then stalled", and "process stopped".
+- **Root cause:** Stream cut: the orchestrator's 5 s slow-client detach while p's event loop was stalled on a loaded machine. Missing retry: not established; the leading hypothesis is that the p process was still stalled or was stopped before the retry request went out. The missing retry ledger is the confirmed defect that kept this open.
+- **Resolution:** p now appends a `custom` entry with `customType: "auto_retry"` for every retry decision (`scheduled` with attempt, max attempts, delay, reason and error; `recovered`; `exhausted`; `cancelled`). Errors are truncated to 500 characters. Custom entries stay out of model context.
+- **Verification:** `test/suite/agent-session-retry-ledger.test.ts` covers recovery, the run's shape (recovered retry, tool turns, second cut), exhaustion, cancellation, non-retryable errors, error truncation, and that entries do not reach the provider context. All retry suites pass.
+- **Prevention/follow-up:** On the next unexplained stop, check for an `auto_retry` `scheduled` entry after the error. If present with no following request, the stall is between scheduling and the request; if absent, the process stopped before post-run handling. The orchestrator should also emit an SSE error event when it detaches a slow client.
+- **Reusable learning:** Every automatic recovery decision belongs in the durable session log, not only in UI events; otherwise a post-mortem cannot tell a harness bug from a stalled or killed process.
+- **References:** `packages/coding-agent/src/core/agent-session/auto-retry-ledger.ts`, `packages/coding-agent/docs/session-format.md` (CustomEntry), [toolchain version probe learning](2026-11-21-toolchain-version-probes-blocked-as-mutations.md) from the same run.
