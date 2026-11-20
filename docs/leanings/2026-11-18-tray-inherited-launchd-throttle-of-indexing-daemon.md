@@ -1,0 +1,30 @@
+# 2026-11-18 — The macOS tray inherited the indexing daemon's launchd throttle
+
+- **Status:** Resolved
+- **Task/context:** The user reported that the `P Code Indexing` menu-bar item took 10-30 s from click to menu. An earlier change (#181) had already moved all disk reads and `launchctl` probes out of `menuWillOpen`, and the symptom persisted.
+- **Unexpected observation or failure:** The tray's own code was cheap (about 2 % CPU at idle), yet its menu opened in 10-30 s while the machine was busy and in 0.2 s while it was quiet.
+- **Evidence:**
+  - `ps -o pri` showed the production tray at priority 20 (utility QoS clamp), the same as its parent indexing daemon, while ordinary apps ran at 46-49. The 1-minute load average was 90-150 on 10 cores.
+  - `~/Library/LaunchAgents/com.dst.p.code-index.plist` has no `ProcessType`. launchd then applies light resource limits to the job, and the tray, spawned by the daemon with `child_process.spawn`, inherited them.
+  - The same tray binary was clicked through `CGEvent` and the menu window was timed through `CGWindowListCopyWindowInfo`, under identical synthetic load (20 busy loops on 10 cores). From a shell (priority 46): 0.14-0.41 s. As a default launchd job (priority 20): 4.1, 2.6, 1.2 and 1.4 s, and once it had not registered its status item within 4 s. As a launchd job with `ProcessType` `Interactive` (priority 37): 0.16-0.30 s.
+  - Final side-by-side run at load 114-150: the production tray took 9.6, 18.5 and 12.8 s on three of six clicks. The fixed tray took 0.09-0.18 s on all six, while the status file was rewritten 20 times per second.
+- **Approaches tried:**
+  - **Attempt:** Blame status-file churn: each write made the tray assign a new `NSImage` and tooltip, which re-renders the status-item replicant (`-[NSStatusItem _updateReplicants]` dominated a 1 ms `sample` of the main thread).
+    - **Outcome:** Did not work
+    - **Why:** It is not the root cause. With 20 writes per second and an unthrottled tray, the menu still opened in about 0.16 s. The redundant redraws are real waste, and they were removed, but they do not explain the delay.
+  - **Attempt:** Lift the clamp from inside the tray at startup with `setpriority(PRIO_DARWIN_PROCESS, 0, 0)` or `task_policy_set(TASK_CATEGORY_POLICY, TASK_FOREGROUND_APPLICATION | TASK_DEFAULT_APPLICATION)`.
+    - **Outcome:** Did not work
+    - **Why:** Every thread stayed at priority 20. The kernel enforces the launchd job's process type, and a process cannot raise its own clamp.
+  - **Attempt:** Run the tray as a separate per-session launchd job with `ProcessType` `Interactive`.
+    - **Outcome:** Worked
+    - **Why:** launchd gives Interactive jobs the same resource treatment as apps.
+- **Root cause:** Resource policy inheritance. A UI process spawned by a background launchd job runs with that job's throttled QoS, and CPU contention then starves its main thread.
+- **Resolution:** `IndexingTrayManager` on macOS writes `<agentDir>/indexing-service/com.dst.p.code-index-tray.<hash>.plist` (`ProcessType` `Interactive`, `RunAtLoad`, no `KeepAlive`). It starts the tray with `launchctl kickstart`, falling back to `bootstrap`. Repeated starts within 60 s skip `launchctl`, because every spawn blocks the throttled daemon's event loop. A changed definition is reloaded once launchd reports the old job gone. The tray is stopped with `launchctl kill TERM`, so the existing SIGTERM shield for a tray-initiated service Stop still works. The managed tray (`P_INDEXING_TRAY_MANAGED=1`) terminates a leftover unmanaged `p-indexing-tray` that holds the single-instance lock. Otherwise a tray orphaned by an older daemon would keep the throttled instance on screen while the new one exited at the lock. The tray also reassigns its icon and tooltip only when they change.
+- **Verification:**
+  - Unit tests with a recorded `launchctl` runner (`indexing-tray-launchd-job.test.ts`, `indexing-tray-manager.test.ts`).
+  - Compiled-Swift tests of the redraw decision (`indexing-tray-macos-button-appearance.test.ts`) and of the lock takeover against real processes (`indexing-tray-macos-single-instance.test.ts`).
+  - The live launchd start/stop/repeat-start round trip through the real manager.
+  - The click-latency measurements above.
+- **Prevention/follow-up:** When a UI belongs to a background service, check the effective scheduling of the UI process (`ps -o pri`) under load, not only that its main thread does no blocking work. A source-level "non-blocking" test cannot catch scheduling starvation.
+- **Reusable learning:** On macOS, never spawn an interactive UI from a launchd agent that has no `ProcessType`, or one set to `Background` or `Standard`. Give the UI its own launchd job with `ProcessType` `Interactive`, or launch it as an app through LaunchServices.
+- **References:** `packages/coding-agent/src/core/indexing-tray-launchd-job.ts`, `packages/coding-agent/src/core/indexing-tray-manager.ts`, `packages/coding-agent/src/tray/macos/status_item_manager.swift`, earlier context in [2026-10-31-daemon-stop-terminates-its-own-tray.md](2026-10-31-daemon-stop-terminates-its-own-tray.md), `man launchd.plist` (`ProcessType`).

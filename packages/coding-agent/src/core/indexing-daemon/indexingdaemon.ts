@@ -12,7 +12,8 @@ import {
 import { sendSystemNotification } from "../../utils/system-notifier.ts";
 import { recordIndexingResourceFailureForRepo } from "../indexed-repos.ts";
 import { computeIndexingRuntimeConfigFingerprint } from "../indexing-runtime-config.ts";
-import { IndexingTrayManager, type IndexingTrayService } from "../indexing-tray-manager.ts";
+import type { IndexingTrayService } from "../indexing-tray-manager.ts";
+import { NO_INDEXING_TRAY } from "../indexing-tray-none.ts";
 import { computeIndexingVersion } from "../indexing-version.ts";
 import { DEFAULT_REPOSITORY_TIMEOUT_MS } from "./constants.ts";
 import { do_drainWorker, do_requestRefresh, do_startDrain } from "./indexingdaemon-methods/health-check.ts";
@@ -173,7 +174,8 @@ export class IndexingDaemon {
     this.watchFactory =
       options.watchFactory ??
       ((target, watchOptions, listener) => fs.watch(target, { ...watchOptions, encoding: "utf8" }, listener));
-    this.trayManager = options.trayManager ?? new IndexingTrayManager({ agentDir: options.agentDir });
+    // Only the service entry point passes a real tray; a library or test daemon shows none.
+    this.trayManager = options.trayManager ?? NO_INDEXING_TRAY;
     this.indexingVersion = computeIndexingVersion();
     this.runtimeConfigFingerprint = computeIndexingRuntimeConfigFingerprint(options.agentDir);
   }

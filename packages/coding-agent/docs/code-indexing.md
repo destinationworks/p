@@ -182,6 +182,8 @@ The `semantic_search` tool checks the repository opt-in registry before accessin
 
 The daemon starts a small status indicator: a menu-bar item on macOS (`p-indexing-tray`, built from `packages/coding-agent/src/tray/macos`) and a GTK/AppIndicator item on Linux desktops with a display (`indexing_tray.py`). Set `enableTray` to `false` in `code-rag.json` to disable it.
 
+On macOS the tray is not a child of the daemon. launchd gives the daemon's job (no `ProcessType`) light resource limits that clamp it to utility QoS, and a child process inherits that clamp: under CPU load the menu took 10-30 s to open. The daemon therefore runs the tray as its own per-session launchd job, `com.dst.p.code-index-tray.<hash of the agent directory>`, with `ProcessType` `Interactive`, `RunAtLoad` and no `KeepAlive`. Its plist lives in `~/.p/agent/indexing-service/`, not in `~/Library/LaunchAgents`, so it never loads at login on its own. The daemon runs `launchctl kickstart` (which leaves a running tray alone) at start, at each five-minute reconcile, and when `code-rag.json` or `settings.json` changes, at most once a minute between stops; it bootstraps the plist when launchd does not know the job and reloads it when the definition changes. Daemon shutdown and disabling the tray send it `SIGTERM` with `launchctl kill`. The launchd-managed tray terminates a leftover `p-indexing-tray` that holds the single-instance lock, such as a tray an older daemon started as its child. A daemon constructed by library code or tests has no tray; only the service entry point starts one. Each agent directory used with the service gets its own tray job, which stays loaded (idle once the tray exits) until logout.
+
 The menu shows the service state, compute device, repositories, and these actions:
 
 | State | Service item | Other actions |
@@ -195,9 +197,9 @@ Stopping frees the memory held by the daemon, its embedding server, and Qdrant. 
 
 A stopped service stays stopped until you choose **Start Indexing Service**, rerun `./reinstall.sh`, or log in again (the plist keeps `RunAtLoad`, and the systemd unit is enabled). While it is stopped, the footer shows the service as unavailable (see Footer status) and nothing is indexed.
 
-The macOS tray survives a Stop so it can offer Start: it ignores the `SIGTERM` the daemon sends its tray child during shutdown for the duration of the `bootout`. On Linux the tray is a child of the systemd unit, so systemd stops it together with the service; start the service again with `systemctl --user start com.dst.p.code-index.service`.
+The macOS tray survives a Stop so it can offer Start: it ignores the `SIGTERM` the daemon sends it during shutdown for the duration of the `bootout`. On Linux the tray is a child of the systemd unit, so systemd stops it together with the service; start the service again with `systemctl --user start com.dst.p.code-index.service`.
 
-The menu is built from in-memory state only. The tray reads its JSON files, probes `launchctl print` (or `systemctl --user is-active`), and checks the plist on background queues every two seconds, so opening the menu never waits on disk or a subprocess. State older than ten seconds is shown with "(refreshing...)".
+The menu is built from in-memory state only. The tray reads its JSON files, probes `launchctl print` (or `systemctl --user is-active`), and checks the plist on background queues every two seconds, so opening the menu never waits on disk or a subprocess. The menu-bar icon and tooltip are reassigned only when they change, because every assignment re-renders the item in the system menu bar. State older than ten seconds is shown with "(refreshing...)".
 
 ## Local files and processes
 
@@ -219,6 +221,8 @@ With the default agent directory, indexing state is stored under `~/.p/agent`:
 | `indexing-service/vitisai-cache/` | Compiled AMD Vitis AI model cache |
 | `indexing-service/openvino-cache/` | Compiled Intel OpenVINO model cache |
 | `indexing-service/logs/` | Service stdout and stderr logs |
+| `indexing-service/com.dst.p.code-index-tray.<hash>.plist` | macOS only: launchd definition of the menu-bar tray job |
+| `indexing-tray.pid` | Single-instance lock and PID of the running tray |
 
 Set `P_CODING_AGENT_DIR` to move the entire agent directory. The service installer records the selected absolute paths when it is installed, so rerun `./reinstall.sh` after changing that location. Moving or deleting the source checkout does not move the installed runtime.
 
