@@ -16,6 +16,8 @@ describe("read-only shell discovery classification", () => {
       "ls -la 2>&1 | head",
       "git rev-parse --show-toplevel 2>&1",
       "cd /tmp && ls",
+      // qwen3.8-27b's first call in the 2026-11-18 strict-tier run; the gate blocked it as a mutation.
+      "pwd && ls -la && node --version && npm --version",
     ])("classifies %s as read-only and resolves it to a read effect", (command) => {
       expect(isReadOnly(command)).toBe(true);
       expect(resolvedTaskVerificationToolEffect({ toolCall: { name: "bash" }, args: { command } }).kind).toBe("read");
@@ -98,6 +100,69 @@ describe("read-only shell discovery classification", () => {
       "cd x && echo y > z",
       "FOO=1 cd x",
       "pushd /tmp",
+    ])("rejects %s", (command) => {
+      expect(isReadOnly(command)).toBe(false);
+    });
+  });
+
+  describe("toolchain version probes", () => {
+    // Mirrors DISCOVERY_VERSION_PROBE_FLAGS: every accepted flag passes, every other probe flag stays gated.
+    const accepted: Record<string, string[]> = {
+      node: ["--version", "-v"],
+      npm: ["--version", "-v"],
+      npx: ["--version"],
+      bun: ["--version", "-v"],
+      deno: ["--version", "-V"],
+      python: ["--version", "-V"],
+      python3: ["--version", "-V"],
+      pip: ["--version", "-V"],
+      pip3: ["--version", "-V"],
+      uv: ["--version", "-V"],
+      go: ["version"],
+      git: ["--version"],
+      tsc: ["--version", "-v"],
+    };
+    const probeFlags = ["--version", "-v", "-V", "version", "--VERSION"];
+
+    it.each(Object.entries(accepted))("accepts exactly the documented version flags for %s", (tool, flags) => {
+      for (const flag of probeFlags) {
+        expect(isReadOnly(`${tool} ${flag}`), `${tool} ${flag}`).toBe(flags.includes(flag));
+      }
+      expect(isReadOnly(`${tool} ${flags[0]} extra`)).toBe(false);
+      expect(isConfidentlyReadOnlyShellTool("bash", { command: `${tool} ${flags[0]}` })).toBe(false);
+    });
+
+    it.each(["yarn", "pnpm", "cargo", "rustc", "ruby", "make", "java"])(
+      "keeps %s probes gated because the workspace can choose the program or the flag is not a pure version query",
+      (tool) => {
+        for (const flag of probeFlags) expect(isReadOnly(`${tool} ${flag}`), `${tool} ${flag}`).toBe(false);
+      },
+    );
+
+    it.each(["node --version", "node --version 2>&1", "which node && node --version", "pwd; go version"])(
+      "resolves %s to a read effect",
+      (command) => {
+        expect(isReadOnly(command)).toBe(true);
+        expect(resolvedTaskVerificationToolEffect({ toolCall: { name: "bash" }, args: { command } }).kind).toBe("read");
+      },
+    );
+
+    it.each([
+      "node script.js",
+      "node -e 1",
+      "node -p 1",
+      "npm --version --registry=x",
+      "npm -v install",
+      "npm version patch",
+      "python3 -c 1",
+      "go version -m ./bin",
+      "go run .",
+      "./node --version",
+      "/usr/local/bin/node --version",
+      "NODE_OPTIONS=--require=./x.js node --version",
+      "node --version > version.txt",
+      "node --version && npm install",
+      "node --version | tee version.txt",
     ])("rejects %s", (command) => {
       expect(isReadOnly(command)).toBe(false);
     });

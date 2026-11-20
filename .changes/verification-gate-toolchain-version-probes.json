@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "packages": ["coding-agent"],
+  "type": "Fixed",
+  "summary": "Treat single-argument toolchain version probes such as `node --version`, `npm -v`, and `go version` as read-only discovery, so the evidence gate no longer blocks them before the completion checklist."
+}
