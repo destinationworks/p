@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { IndexingDaemon } from "../src/core/indexing-daemon/indexingdaemon.ts";
+import { IndexingDaemon } from "../src/core/indexing-daemon/indexingdaemon.ts";
 import { do_reconcile } from "../src/core/indexing-daemon/indexingdaemon-methods/lifecycle.ts";
 import { do_watchRegistry } from "../src/core/indexing-daemon/indexingdaemon-methods/status-monitoring.ts";
 import type { IndexingTrayService } from "../src/core/indexing-tray-manager.ts";
@@ -143,6 +143,34 @@ describe("indexing daemon tray integration", () => {
       watchCallback!("change", "some-other-file.json");
       expect(tray.start).not.toHaveBeenCalled();
       expect(tray.stop).not.toHaveBeenCalled();
+    });
+  });
+  describe("tray ownership", () => {
+    it("a daemon constructed without a tray manager never launches a tray, even with one installed", () => {
+      // Only the service entry point wires the real tray. Library and test daemons used to spawn
+      // whatever p-indexing-tray they found, leaving stray menu-bar items behind.
+      const binDir = path.join(tempDir, "indexing-service", "bin");
+      fs.mkdirSync(binDir, { recursive: true });
+      // A runnable stand-in: an empty file would make spawn throw ENOEXEC and hide the bug.
+      fs.writeFileSync(path.join(binDir, "p-indexing-tray"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+      fs.writeFileSync(path.join(tempDir, "indexing-service", "indexing_tray.py"), "");
+      const savedDisplay = process.env.DISPLAY;
+      process.env.DISPLAY = ":0";
+      try {
+        const daemon = new IndexingDaemon({
+          agentDir: tempDir,
+          qdrantBinary: "unused",
+          qdrantDataDirectory: path.join(tempDir, "qdrant"),
+          pythonExecutable: "unused",
+          embeddingModel: "unused",
+        });
+        expect(daemon.trayManager.start()).toBe(false);
+        expect(daemon.trayManager.isRunning()).toBe(false);
+        expect(() => daemon.trayManager.stop()).not.toThrow();
+      } finally {
+        if (savedDisplay === undefined) delete process.env.DISPLAY;
+        else process.env.DISPLAY = savedDisplay;
+      }
     });
   });
 });
