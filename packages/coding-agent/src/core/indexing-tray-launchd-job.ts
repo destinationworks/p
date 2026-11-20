@@ -13,6 +13,12 @@ import path from "node:path";
 export const TRAY_LAUNCHD_LABEL_PREFIX = "com.dst.p.code-index-tray";
 /** Tells the tray it is the launchd-managed instance (see single_instance_lock.swift). */
 export const TRAY_MANAGED_ENV = "P_INDEXING_TRAY_MANAGED";
+/**
+ * SHA-256 of the tray binary the job was defined for. Reinstall writes the new build to the same
+ * path, and a running tray keeps executing the file it started from, so the digest is what makes a
+ * new build a changed definition, which reloads the job and restarts the tray once.
+ */
+export const TRAY_BINARY_DIGEST_ENV = "P_INDEXING_TRAY_BINARY_SHA256";
 
 /** `launchctl` exit status for "Could not find service". */
 export const LAUNCHCTL_SERVICE_NOT_FOUND = 113;
@@ -73,7 +79,16 @@ function escapeXml(value: string): string {
     .replace(/'/g, "&apos;");
 }
 
-export function renderTrayLaunchdPlist(label: string, programArguments: string[], agentDir: string): string {
+export function trayBinaryDigest(binaryPath: string): string {
+  return createHash("sha256").update(fs.readFileSync(binaryPath)).digest("hex");
+}
+
+export function renderTrayLaunchdPlist(
+  label: string,
+  programArguments: string[],
+  agentDir: string,
+  binaryDigest: string,
+): string {
   const argumentLines = programArguments.map((argument) => `        <string>${escapeXml(argument)}</string>`);
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
@@ -92,6 +107,8 @@ export function renderTrayLaunchdPlist(label: string, programArguments: string[]
     `        <string>${escapeXml(agentDir)}</string>`,
     `        <key>${TRAY_MANAGED_ENV}</key>`,
     "        <string>1</string>",
+    `        <key>${TRAY_BINARY_DIGEST_ENV}</key>`,
+    `        <string>${escapeXml(binaryDigest)}</string>`,
     "    </dict>",
     "    <key>ProcessType</key>",
     "    <string>Interactive</string>",
@@ -131,7 +148,7 @@ export function startTrayLaunchdJob(
   sleep: SyncSleep = sleepSync,
 ): boolean {
   if (readFileIfPresent(job.plistPath) !== plist) {
-    // A job loaded from an older definition would keep its old binary path; drop it first.
+    // A job loaded from an older definition keeps running its old binary; drop it first.
     if (run(["bootout", job.target]).status === 0) waitUntilUnloaded(job, run, sleep);
     fs.mkdirSync(path.dirname(job.plistPath), { recursive: true, mode: 0o700 });
     fs.writeFileSync(job.plistPath, plist, { mode: 0o600 });

@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "packages": ["coding-agent"],
+  "type": "Fixed",
+  "summary": "Restart the macOS indexing tray once after a reinstall replaces its binary, instead of leaving the old tray running until it is quit or the user logs out."
+}

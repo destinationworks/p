@@ -10,6 +10,7 @@ import {
   runLaunchctl,
   startTrayLaunchdJob,
   type TrayLaunchdJob,
+  trayBinaryDigest,
   trayLaunchdJob,
 } from "./indexing-tray-launchd-job.ts";
 
@@ -196,12 +197,15 @@ export class IndexingTrayManager implements IndexingTrayService {
     const startedAt = this.launchdStartedAt;
     if (startedAt !== undefined && this.now() - startedAt < TRAY_LAUNCHD_RECHECK_MS) return true;
     const job = this.launchdJob;
-    const plist = renderTrayLaunchdPlist(job.label, [plan.command, ...plan.args], this.agentDir);
     let started = false;
     try {
+      // Hashed before any launchctl call, so an unreadable binary leaves a running tray alone.
+      const digest = trayBinaryDigest(plan.command);
+      const plist = renderTrayLaunchdPlist(job.label, [plan.command, ...plan.args], this.agentDir, digest);
       started = startTrayLaunchdJob(job, plist, this.runLaunchctl);
     } catch {
-      // An unwritable agent directory: report no tray and retry at the next call.
+      // An unreadable tray binary or an unwritable agent directory: report no tray and retry at
+      // the next call.
     }
     this.launchdStartedAt = started ? this.now() : undefined;
     return started;
