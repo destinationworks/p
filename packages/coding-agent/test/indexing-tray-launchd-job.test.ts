@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -10,8 +11,10 @@ import {
   renderTrayLaunchdPlist,
   runLaunchctl,
   startTrayLaunchdJob,
+  TRAY_BINARY_DIGEST_ENV,
   TRAY_MANAGED_ENV,
   type TrayLaunchdJob,
+  trayBinaryDigest,
   trayLaunchdJob,
 } from "../src/core/indexing-tray-launchd-job.ts";
 
@@ -38,12 +41,14 @@ function fakeLaunchctl(replies: Record<string, Reply[] | Reply> = {}) {
 }
 
 const noSleep = () => {};
+const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
 
 describe("tray launchd job", () => {
   let agentDir: string;
   let job: TrayLaunchdJob;
   const program = ["/opt/p/bin/p-indexing-tray"];
-  const plistFor = () => renderTrayLaunchdPlist(job.label, program, agentDir);
+  const digest = sha256("tray build 1");
+  const plistFor = (binaryDigest = digest) => renderTrayLaunchdPlist(job.label, program, agentDir, binaryDigest);
   const defineJob = () => startTrayLaunchdJob(job, plistFor(), fakeLaunchctl().run, noSleep);
 
   beforeEach(() => {
@@ -79,10 +84,11 @@ describe("tray launchd job", () => {
       expect(plist).toContain("<string>/opt/p/bin/p-indexing-tray</string>");
       expect(plist).toContain(`<key>P_CODING_AGENT_DIR</key>\n        <string>${agentDir}</string>`);
       expect(plist).toContain(`<key>${TRAY_MANAGED_ENV}</key>\n        <string>1</string>`);
+      expect(plist).toContain(`<key>${TRAY_BINARY_DIGEST_ENV}</key>\n        <string>${digest}</string>`);
     });
 
     it("escapes XML metacharacters in paths and arguments", () => {
-      const plist = renderTrayLaunchdPlist("label", ["/a&b/<tray>", `it's "x"`], "/agent&dir");
+      const plist = renderTrayLaunchdPlist("label", ["/a&b/<tray>", `it's "x"`], "/agent&dir", digest);
       expect(plist).toContain("<string>/a&amp;b/&lt;tray&gt;</string>");
       expect(plist).toContain("<string>it&apos;s &quot;x&quot;</string>");
       expect(plist).toContain("<string>/agent&amp;dir</string>");
@@ -91,7 +97,7 @@ describe("tray launchd job", () => {
 
     it.skipIf(process.platform !== "darwin")("is a property list that plutil accepts", () => {
       const file = path.join(agentDir, "tray.plist");
-      fs.writeFileSync(file, renderTrayLaunchdPlist(job.label, ["/a&b/<tray>", "--flag"], "/agent dir/it's"));
+      fs.writeFileSync(file, renderTrayLaunchdPlist(job.label, ["/a&b/<tray>", "--flag"], "/agent dir/it's", digest));
       const lint = spawnSync("/usr/bin/plutil", ["-lint", file], { encoding: "utf8" });
       expect(lint.status, lint.stdout + lint.stderr).toBe(0);
     });
@@ -142,13 +148,24 @@ describe("tray launchd job", () => {
 
     it("reloads the job when the definition changes, waiting until launchd has dropped the old one", () => {
       defineJob();
-      const moved = renderTrayLaunchdPlist(job.label, ["/new/p-indexing-tray"], agentDir);
+      const moved = renderTrayLaunchdPlist(job.label, ["/new/p-indexing-tray"], agentDir, digest);
       const naps: number[] = [];
       const launchctl = fakeLaunchctl({ print: [{ status: 0 }, { status: 0 }] });
       expect(startTrayLaunchdJob(job, moved, launchctl.run, (ms) => naps.push(ms))).toBe(true);
       expect(launchctl.subcommands()).toEqual(["bootout", "print", "print", "print", "bootstrap"]);
       expect(naps).toEqual([100, 100]);
       expect(fs.readFileSync(job.plistPath, "utf8")).toBe(moved);
+    });
+
+    it("reloads a running tray once when only the binary at the same path changed", () => {
+      defineJob();
+      const rebuilt = fakeLaunchctl();
+      expect(startTrayLaunchdJob(job, plistFor(sha256("tray build 2")), rebuilt.run, noSleep)).toBe(true);
+      expect(rebuilt.subcommands()).toEqual(["bootout", "print", "bootstrap"]);
+
+      const again = fakeLaunchctl();
+      expect(startTrayLaunchdJob(job, plistFor(sha256("tray build 2")), again.run, noSleep)).toBe(true);
+      expect(again.subcommands()).toEqual(["kickstart"]);
     });
 
     it("by default blocks between polls, so the daemon really gives launchd time to drop the old job", () => {
@@ -185,6 +202,27 @@ describe("tray launchd job", () => {
     it("treats a launchctl that could not run or timed out (no status) as failure", () => {
       const launchctl = fakeLaunchctl({ bootstrap: { status: null } });
       expect(startTrayLaunchdJob(job, plistFor(), launchctl.run, noSleep)).toBe(false);
+    });
+  });
+
+  describe("trayBinaryDigest", () => {
+    it("is the SHA-256 of the binary's bytes, independent of the file's identity and timestamps", () => {
+      const binary = path.join(agentDir, "p-indexing-tray");
+      fs.writeFileSync(binary, "tray build 1");
+      expect(trayBinaryDigest(binary)).toBe(sha256("tray build 1"));
+
+      const sameBytesNewFile = path.join(agentDir, "rebuilt");
+      fs.writeFileSync(sameBytesNewFile, "tray build 1");
+      fs.utimesSync(sameBytesNewFile, new Date(0), new Date(0));
+      fs.renameSync(sameBytesNewFile, binary);
+      expect(trayBinaryDigest(binary)).toBe(sha256("tray build 1"));
+
+      fs.writeFileSync(binary, "tray build 2");
+      expect(trayBinaryDigest(binary)).toBe(sha256("tray build 2"));
+    });
+
+    it("throws when the binary cannot be read", () => {
+      expect(() => trayBinaryDigest(path.join(agentDir, "missing"))).toThrow(/ENOENT/);
     });
   });
 
