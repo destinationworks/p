@@ -1,0 +1,36 @@
+# 2026-11-21 — Fresh-worktree test suite needs a local build and a numpy interpreter
+
+- **Status:** Resolved
+- **Task/context:** Running the pre-push gates (`./test.sh` / `npm run test:unit`) for a macOS tray PR from a fresh worktree on a Mac shared by several agent sessions and one central `~/.p/install` runtime. Follows [2026-10-12 — Fresh worktree dist provenance](2026-10-12-worktree-dist-provenance.md).
+- **Unexpected observation or failure:**
+  - After `npm ci --ignore-scripts` and `./reinstall.sh`, 9 coding-agent test files (64 tests: extension discovery/input/runner, resource loader, project trust, Qdrant HTTP transport, voice server CLI, both indexing reinstall suites) failed with `ERR_MODULE_NOT_FOUND` for `node_modules/@dst0/*/dist/index.js` and `packages/coding-agent/dist/indexing-service-daemon.js`.
+  - 5 code-index Python tests errored with `No module named 'numpy'`.
+- **Evidence:**
+  - `reinstall.sh` stages a `git archive` of HEAD into `~/.p/install/versions/v<version>-<sha12>-<random>` and runs `npm run build` there (`scripts/central-install-snapshot.js`); the source worktree never gets `dist`.
+  - Copying `packages/*/dist` from the runtime built from the same commit made the 9 files pass (108/108).
+  - `python3` resolved to a Homebrew Python 3.15 without numpy; the same suite passed with `~/.p/agent/indexing-service/venv/bin/python`.
+  - CI (`.github/workflows/ci.yml`) runs `npm ci --ignore-scripts` then `npm run build` in the checkout before `npm run test:unit:coverage`; the release workflow installs pinned numpy for `python3` before `npm test`.
+- **Approaches tried:**
+  - **Attempt:** Follow the documented rule: copy `dist` from a central runtime built from the exact source HEAD.
+    - **Outcome:** Partial
+    - **Why:** It works only after a `./reinstall.sh` at that exact commit, which relinks the global `p` and may restart the shared daemon for every session before the suite has even run. No runtime existed for current `main`. The copied `dist` is the committed snapshot, so dist-loading tests silently exercise old code when the worktree has uncommitted edits. Agents also had to discover which directories and which runtime to copy by hand.
+  - **Attempt:** Build in the worktree with `npm run build`, as CI does.
+    - **Outcome:** Worked
+    - **Why:** `dist` matches the code under test, needs no global side effect, and is the same path CI proves. It required a user-approved exception to the "never run `npm run build`" rule.
+  - **Attempt:** Make the Python tests skip when numpy is missing.
+    - **Outcome:** Did not work (rejected)
+    - **Why:** A skip turns a broken host into a silent pass.
+  - **Attempt:** Select the interpreter: explicit `P_CODE_INDEX_TEST_PYTHON`, else `python3` with numpy, else the managed indexing venv built from `packages/code-index/requirements.txt`; otherwise fail listing each rejected interpreter.
+    - **Outcome:** Worked
+    - **Why:** CI keeps using `python3`; a local host whose `python3` lost numpy falls back to the pinned venv; an explicit override never falls back silently. A first version probed in the caller's cwd/env but ran the suite in `packages/code-index`, so a relative override could pass the probe and then fail to start; the probe now uses the suite's cwd and env, and relative paths resolve from npm's `INIT_CWD`.
+- **Side finding:** The sanctioned `npm run build` regenerated the tracked `packages/site/src/docsData.json`, because #193 changed `packages/coding-agent/docs/code-indexing.md` without regenerating it. A worktree build therefore dirties the tree (which also blocks `./reinstall.sh`'s clean-checkout requirement) until the generated file is committed.
+- **Root cause:** The centralized install (#155) moved the build out of the source checkout, but the test-setup instruction kept assuming a build artifact the checkout no longer receives, and the only sanctioned way to create one was a global install of a different directory. Separately, the code-index test script hard-coded `python3`, whose package set depends on the host's Python upgrades.
+- **Resolution:**
+  - `AGENTS.md` allows `npm run build` inside the test checkout before `./test.sh` as the sole exception, and forbids copying or symlinking the central `dist`.
+  - `./test.sh` runs `scripts/check-test-dist.js` first and stops, before moving `auth.json`, with the exact fix when a required entrypoint is missing or a `dist` is a symlink.
+  - `packages/code-index` runs its Python tests through `scripts/code-index-python-tests.js`.
+- **Verification:** `scripts/check-test-dist.test.js` and `scripts/code-index-python-tests.test.js` (real child processes with stand-in interpreters and symlinks); `./test.sh` in the fresh worktree failed fast without `dist` and passed after `npm ci --ignore-scripts` and `npm run build`; the real Python suite passed through the venv fallback.
+  - The regenerated `docsData.json` is committed, and `AGENTS.md` says to commit it whenever the build changes it.
+- **Prevention/follow-up:** The preflight's entrypoint list is checked against each package's `exports`/`main`, so a renamed entrypoint fails its test rather than the suite. `scripts/check-test-dist.test.js` pins that `test.sh` runs the check before its auth trap and `mv`. Open: nothing yet fails CI when `docsData.json` drifts from `packages/coding-agent/docs`; a `--check` mode for `scripts/build-site-docs.js` in `npm run check` would.
+- **Reusable learning:** When installation moves builds out of the source checkout, tests must build their own artifacts in the checkout they test; borrowing artifacts from the installed copy couples tests to global state and to a different commit.
+- **References:** `scripts/check-test-dist.js`, `scripts/code-index-python-tests.js`, `test.sh`, `AGENTS.md` (Commands), `.github/workflows/ci.yml`.

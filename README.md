@@ -95,6 +95,8 @@ npm run test:cli               # Smoke-test the source CLI wrapper
 npm run dev --                 # Run p from sources
 ```
 
+Run `npm run build` in a checkout before `npm run test:unit` (CI does the same): part of the suite loads the built `packages/*/dist`, and `./reinstall.sh` builds only the centralized runtime under `~/.p/install`. The code-index Python tests need numpy; set `P_CODE_INDEX_TEST_PYTHON` when neither `python3` nor the managed indexing venv provides it.
+
 For a short same-model comparison between this fork and the upstream agent, see
 [Agent benchmarking](packages/coding-agent/docs/benchmarking.md).
 
