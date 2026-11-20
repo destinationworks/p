@@ -1,6 +1,7 @@
 import { acquireRepositoryLock, writeManifestAtomic } from "../../manifest.ts";
 import type { IndexUpdateSummary, RefreshIndexOptions } from "../../types.ts";
 import { mapOperationError } from "../helpers.ts";
+import { purgePendingFileVersions } from "../pending-file-cleanup.ts";
 import type { WorkspaceCodeRagService } from "../workspacecoderagservice.ts";
 
 export async function do_runRefresh(
@@ -27,6 +28,16 @@ export async function do_runRefresh(
         ? self.lastError.message
         : self.manifestIncompatibility(self.manifest)
       : "Index is not initialized";
+    // Reclaim chunks hidden by an earlier cancelled or failed in-place refresh before planning new work.
+    // An incompatible index keeps the record until the rebuild that replaces its collection commits.
+    if (self.manifest && incompatibility === undefined) {
+      try {
+        await purgePendingFileVersions(self.repositoryDirectory, self.vectorStore, self.manifest, self.repoId, signal);
+      } catch {
+        // Search already hides these versions and generation copies skip them; a cleanup failure must never
+        // block a refresh or rebuild. The record stays for the next attempt.
+      }
+    }
 
     // Sparse vocabulary changes require a new generation so stored and query token indices stay aligned
     const previousFileCount = Object.keys(self.manifest?.files ?? {}).length;
@@ -61,7 +72,7 @@ export async function do_runRefresh(
     if (options.forceSparseRebuild || !self.manifest || incompatibility !== undefined) {
       return await self.performRebuild(scanned, plan, startedAt, signal, options.onProgress);
     }
-    if (options.transactional || sparseDriftExceeded || changeRatio > self.settings.fullSparseRebuildChangeRatio) {
+    if (sparseDriftExceeded || changeRatio > self.settings.fullSparseRebuildChangeRatio) {
       return await self.performSparseGenerationRefresh(scanned, plan, startedAt, signal, options.onProgress);
     }
     return await self.performIncrementalRefresh(plan, startedAt, signal, options.onProgress);
