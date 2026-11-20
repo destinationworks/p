@@ -53,7 +53,16 @@ export function extractFileOpsFromMessage(message: AgentMessage, fileOps: FileOp
 /** Compute sorted read-only and modified file lists from accumulated operations. */
 export function computeFileLists(fileOps: FileOperations): { readFiles: string[]; modifiedFiles: string[] } {
   const modified = new Set([...fileOps.edited, ...fileOps.written]);
-  const readOnly = [...fileOps.read].filter((f) => !modified.has(f)).sort();
+
+  // Optimization: Use explicit for...of loop to avoid intermediate array allocation from [...Set].filter(...)
+  const readOnly: string[] = [];
+  for (const f of fileOps.read) {
+    if (!modified.has(f)) {
+      readOnly.push(f);
+    }
+  }
+  readOnly.sort();
+
   const modifiedFiles = [...modified].sort();
   return { readFiles: readOnly, modifiedFiles };
 }

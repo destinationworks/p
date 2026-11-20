@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "type": "None",
+  "reason": "Optimize computeFileLists to avoid array allocation when filtering Set.",
+  "packages": ["agent"]
+}
