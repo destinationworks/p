@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "packages": ["coding-agent"],
+  "type": "Added",
+  "summary": "The macOS indexing tray menu shows the CPU, memory and GPU used by the indexing daemon and its Qdrant and embedding-server processes, with a per-process breakdown that updates every second while the menu is open."
+}

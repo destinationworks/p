@@ -28,6 +28,10 @@ const BLOCKING_TOKENS = [
   ".sync",
   "flock(",
   "open(",
+  "sampleIndexerResources",
+  "probeGpuUsage",
+  "proc_pid",
+  "sysctl(",
 ];
 
 function matchingBrace(source: string, openIndex: number): number {
@@ -62,6 +66,7 @@ describe("macOS tray menu opens without blocking work", () => {
     "func menuWillOpen(",
     "func requestFileRefresh(",
     "func requestServiceRefresh(",
+    "func requestResourceRefresh(",
     "func applyCacheToButton(",
     "func cacheIsStale(",
   ])("%s runs no disk, subprocess or wait call on the calling thread", (signature) => {
@@ -82,6 +87,7 @@ describe("macOS tray menu opens without blocking work", () => {
   it("performs the file reads and launchctl probe on utility queues, not on the main thread", () => {
     expect(managerSource).toMatch(/fileQueue\.async \{[^}]*loadFileSnapshot\(/s);
     expect(managerSource).toMatch(/serviceQueue\.async \{[^}]*ServiceControl\.loadSnapshot\(/s);
+    expect(managerSource).toMatch(/resourceQueue\.async \{[^}]*sampleIndexerResources\(/s);
     expect(managerSource).toContain("qos: .utility");
   });
 
@@ -91,10 +97,29 @@ describe("macOS tray menu opens without blocking work", () => {
     expect(managerSource).not.toContain("self?.fileDescriptor");
   });
 
-  it("keeps the blocking helpers out of the AppKit menu code entirely", () => {
-    const menuBuilder = fs.readFileSync(path.join(swiftDir, "menu_builder.swift"), "utf8");
-    for (const token of ["Data(contentsOf", "Process(", "launchctl", "FileManager", "ServiceControl"]) {
-      expect(menuBuilder).not.toContain(token);
-    }
+  it.each(["menu_builder.swift", "resource_menu_section.swift"])(
+    "keeps the blocking helpers out of the AppKit menu code in %s",
+    (file) => {
+      const menuCode = fs.readFileSync(path.join(swiftDir, file), "utf8");
+      for (const token of [
+        "Data(contentsOf",
+        "Process(",
+        "launchctl",
+        "FileManager",
+        "ServiceControl",
+        "sampleIndexerResources",
+        "probeGpuUsage",
+      ]) {
+        expect(menuCode).not.toContain(token);
+      }
+    },
+  );
+
+  it("samples resources only while the menu is open, on a timer that fires during menu tracking", () => {
+    expect(functionBody(managerSource, "func menuWillOpen(")).toContain("startResourceSampling()");
+    expect(functionBody(managerSource, "func menuDidClose(")).toContain("stopResourceSampling()");
+    const start = functionBody(managerSource, "private func startResourceSampling(");
+    expect(start).toContain("forMode: .common");
+    expect(functionBody(managerSource, "init(agentDir: String)")).not.toContain("requestResourceRefresh");
   });
 });
