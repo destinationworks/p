@@ -1,6 +1,6 @@
 import type { AgentMessage } from "@dst0/p-agent-core";
 import type { AssistantMessage } from "@dst0/p-ai";
-import { estimateContextTokens, shouldCompact } from "../../compaction/index.ts";
+import { shouldCompact } from "../../compaction/index.ts";
 import { getLatestCompactionEntry } from "../../session-manager.ts";
 import type { AgentSession } from "../agentsession.ts";
 import { MAX_OVERFLOW_RECOVERY_COMPACTIONS } from "../constants.ts";
@@ -70,33 +70,7 @@ export async function do_checkCompaction(
   }
 
   const promptContext = self._preparePromptContext(messages);
-  const compactionTimestamp = compactionEntry ? new Date(compactionEntry.timestamp).getTime() : undefined;
-  const providerEstimate = estimateContextTokens(messages, self.systemPrompt, {
-    sinceTimestamp: compactionTimestamp,
-  });
-  let reliableAssistantUsagesSinceCompaction = 0;
-  if (compactionTimestamp !== undefined) {
-    for (const message of messages) {
-      if (
-        message.role === "assistant" &&
-        message.stopReason !== "aborted" &&
-        message.stopReason !== "error" &&
-        message.usage &&
-        (message.usage.input > 0 || message.usage.cacheRead > 0) &&
-        message.timestamp > compactionTimestamp
-      ) {
-        reliableAssistantUsagesSinceCompaction++;
-      }
-    }
-  }
-  const canUseProviderUsageForThreshold =
-    compactionTimestamp === undefined ||
-    reliableAssistantUsagesSinceCompaction > 1 ||
-    assistantForCompactionCheck?.stopReason === "error";
-  const contextTokens =
-    canUseProviderUsageForThreshold && providerEstimate.lastUsageIndex !== null
-      ? Math.max(promptContext.budgetEstimate.tokens, providerEstimate.usageTokens + providerEstimate.trailingTokens)
-      : promptContext.budgetEstimate.tokens;
+  const contextTokens = promptContext.budgetEstimate.tokens;
   const hasRecordedUserRequest = branchEntries.some(
     (entry) => entry.type === "message" && entry.message.role === "user",
   );

@@ -339,7 +339,7 @@ describe("AgentSession compaction characterization", () => {
     expect(compactionEvents).toEqual([]);
   });
 
-  it("does not immediately recompact after auto-compaction plus one small turn with stale provider usage", async () => {
+  it("does not immediately recompact after auto-compaction plus small turns with stale provider usage", async () => {
     const harness = await createHarness({
       models: [{ id: "faux-small", contextWindow: 100_000 }],
       settings: {
@@ -369,50 +369,36 @@ describe("AgentSession compaction characterization", () => {
     if (!compactionEntry || compactionEntry.type !== "compaction") {
       throw new Error("Expected compaction entry");
     }
-    const compactionTimestamp = new Date(compactionEntry.timestamp).getTime();
-    const postUser: AgentMessage = {
-      role: "user",
-      content: [{ type: "text", text: "check remote state" }],
-      timestamp: compactionTimestamp + 1,
-    };
-    const postAssistant = {
-      ...createAssistant(harness, {
-        stopReason: "stop",
-        totalTokens: 90_000,
-        timestamp: compactionTimestamp + 2,
-      }),
-      content: [{ type: "text" as const, text: "remote state checked" }],
-    };
-    const promptOnlyEstimate = estimateContextTokens(
-      [...harness.session.agent.state.messages, postUser],
-      harness.session.systemPrompt,
-      {
-        useProviderUsage: false,
-      },
-    );
-    harness.sessionManager.appendMessage(postUser);
-    harness.sessionManager.appendMessage(postAssistant);
-    harness.session.agent.state.messages = harness.sessionManager.buildSessionContext().messages;
-    const calculatedEstimate = estimateContextTokens(
-      harness.session.agent.state.messages,
-      harness.session.systemPrompt,
-      {
-        useProviderUsage: false,
-      },
-    );
     const contextUsageBeforeCheck = harness.session.getContextUsage();
     expect(contextUsageBeforeCheck?.contextWindow).toBe(100_000);
-    expect(calculatedEstimate.tokens).toBeGreaterThan(promptOnlyEstimate.tokens);
-    expect(calculatedEstimate.tokens).toBeLessThan(contextUsageBeforeCheck?.triggerThreshold ?? 0);
-
     const runAutoCompactionSpy = vi.spyOn(sessionInternals, "_runAutoCompaction").mockResolvedValue(false);
+    harness.setResponses([
+      createAssistant(harness, {
+        stopReason: "stop",
+        totalTokens: 90_000,
+        content: [{ type: "text" as const, text: "remote state checked" }],
+      }),
+      createAssistant(harness, {
+        stopReason: "stop",
+        totalTokens: 95_000,
+        content: [{ type: "text" as const, text: "local state checked" }],
+      }),
+    ]);
+    let previousEstimate = estimateContextTokens(harness.session.agent.state.messages, harness.session.systemPrompt, {
+      useProviderUsage: false,
+    }).tokens;
 
-    await sessionInternals.checkCompaction(postAssistant);
-
-    expect(runAutoCompactionSpy).not.toHaveBeenCalled();
-    const contextUsageAfterCheck = harness.session.getContextUsage();
-    expect(contextUsageAfterCheck?.tokens).toBe(90_000);
-    expect(contextUsageAfterCheck?.shouldCompact).toBe(false);
+    for (const prompt of ["check remote state", "check local state"]) {
+      await harness.session.prompt(prompt);
+      const estimate = estimateContextTokens(harness.session.agent.state.messages, harness.session.systemPrompt, {
+        useProviderUsage: false,
+      });
+      expect(estimate.tokens).toBeGreaterThan(previousEstimate);
+      expect(estimate.tokens).toBeLessThan(contextUsageBeforeCheck?.triggerThreshold ?? 0);
+      expect(runAutoCompactionSpy).not.toHaveBeenCalled();
+      expect(harness.session.getContextUsage()?.tokens).toBe(estimate.tokens - estimate.staticTokens);
+      previousEstimate = estimate.tokens;
+    }
   });
 
   it("retrieves old tool output by session_recall pointer", async () => {
@@ -1034,7 +1020,7 @@ describe("AgentSession compaction characterization", () => {
     expect(harness.sessionManager.getEntries().filter((entry) => entry.type === "compaction")).toHaveLength(0);
   });
 
-  it("uses reliable provider usage to preflight compact before overflowing a cache-hot prompt", async () => {
+  it("ignores provider usage when the current prompt estimate is below threshold", async () => {
     const harness = await createHarness({
       withConfiguredAuth: false,
       models: [{ id: "faux-small", contextWindow: 32_768 }],
@@ -1072,7 +1058,7 @@ describe("AgentSession compaction characterization", () => {
 
     await sessionInternals.checkCompaction(priorAssistant, false, [nextUser]);
 
-    expect(runAutoCompactionSpy).toHaveBeenCalledWith("threshold", false);
+    expect(runAutoCompactionSpy).not.toHaveBeenCalled();
   });
 
   it("allows threshold compaction between non-terminal tool turns", async () => {
@@ -1085,7 +1071,7 @@ describe("AgentSession compaction characterization", () => {
     const now = Date.now();
     const priorUser: AgentMessage = {
       role: "user",
-      content: [{ type: "text", text: "large cache-hot history ".repeat(100) }],
+      content: [{ type: "text", text: "large cache-hot history ".repeat(6_000) }],
       timestamp: now - 2000,
     };
     const readAssistant = createAssistant(harness, {
@@ -1115,7 +1101,7 @@ describe("AgentSession compaction characterization", () => {
     const now = Date.now();
     const priorUser: AgentMessage = {
       role: "user",
-      content: [{ type: "text", text: "large cache-hot history ".repeat(100) }],
+      content: [{ type: "text", text: "large cache-hot history ".repeat(6_000) }],
       timestamp: now - 2000,
     };
     const finishAssistant = createAssistant(harness, {

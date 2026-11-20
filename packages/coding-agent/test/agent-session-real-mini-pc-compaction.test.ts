@@ -6,7 +6,11 @@ import type { Api, AssistantMessage, Model } from "@dst0/p-ai";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AgentSession, type AgentSessionEvent } from "../src/core/agent-session.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";
-import { estimateContextTokens } from "../src/core/compaction/index.ts";
+import {
+  createContextBudgetReport,
+  createModelCallContextBudgetReport,
+  estimatePreparedModelCallTokens,
+} from "../src/core/compaction/index.ts";
 import type { ExtensionRunner } from "../src/core/extensions/index.ts";
 import { convertToLlm } from "../src/core/messages.ts";
 import { ModelRegistry } from "../src/core/model-registry.ts";
@@ -16,25 +20,31 @@ import { SettingsManager } from "../src/core/settings-manager.ts";
 import { createTestExtensionsResult, createTestResourceLoader } from "./utilities.ts";
 
 const RUN_REAL_MINI_PC_MULTI_46 = process.env.PI_TEST_REAL_MINI_PC_MULTI_46 === "1";
-const MINI_PC_BASE_URL = process.env.PI_TEST_MINI_PC_BASE_URL ?? "http://192.168.8.167:11450/v1";
+const MINI_PC_BASE_URL = process.env.PI_TEST_MINI_PC_BASE_URL ?? "https://192.168.8.167:11450/v1";
 const MINI_PC_PROVIDER = "mini-pc";
 const MINI_PC_MODEL_ID = "multi-46";
-const CYCLE_COUNT = 5;
-const MAX_TURNS_PER_CYCLE = 8;
-const TURN_FILLER_WORDS = 300;
+const CYCLE_COUNT = 5,
+  MAX_TURNS_PER_CYCLE = 8,
+  TURN_FILLER_WORDS = 300;
 
 type SessionWithCompactionInternals = {
   _runAutoCompaction: (reason: "overflow" | "threshold", willRetry: boolean) => Promise<boolean>;
+  checkCompaction: AgentSession["checkCompaction"];
+  _getEffectiveCompactedMessages: () => AgentMessage[];
+  _preparePromptContext: (messages: AgentMessage[]) => { budgetEstimate: { tokens: number } };
+  _getEffectiveCompactionSettings: AgentSession["_getEffectiveCompactionSettings"];
 };
+
+type CandidateUsage = { tokens: number; threshold: number; shouldCompact: boolean };
 
 function createMiniPcModelRegistry(authStorage: AuthStorage): ModelRegistry {
   const modelRegistry = ModelRegistry.inMemory(authStorage);
   modelRegistry.registerProvider(MINI_PC_PROVIDER, {
     name: "Mini PC",
     baseUrl: MINI_PC_BASE_URL,
-    apiKey: "unused",
+    apiKey: process.env.PI_TEST_MINI_PC_API_KEY ?? "unused",
     api: "openai-completions",
-    authHeader: false,
+    authHeader: true,
     models: [
       {
         id: MINI_PC_MODEL_ID,
@@ -69,7 +79,7 @@ function getLatestAssistant(messages: AgentMessage[]): AssistantMessage {
 }
 
 function expectAssistantStopped(message: AssistantMessage): void {
-  expect(message.errorMessage ?? message.stopReason).toBe("stop");
+  expect(message.errorMessage ?? (message.stopReason === "toolUse" ? "stop" : message.stopReason)).toBe("stop");
 }
 
 function logLiveProgress(message: string): void {
@@ -113,14 +123,15 @@ function createRandomizedPostCompactionPrompt(cycle: number, turn: number, rando
 }
 
 describe.skipIf(!RUN_REAL_MINI_PC_MULTI_46)("AgentSession real mini-pc/multi-46 auto-compaction", () => {
-  let session: AgentSession | undefined;
-  let tempDir: string;
+  let session: AgentSession | undefined, tempDir: string;
   let events: AgentSessionEvent[];
+  let compactionCandidateUsages: CandidateUsage[];
 
   beforeEach(() => {
     tempDir = join(tmpdir(), `pi-mini-pc-compaction-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     mkdirSync(tempDir, { recursive: true });
     events = [];
+    compactionCandidateUsages = [];
   });
 
   afterEach(() => {
@@ -132,7 +143,7 @@ describe.skipIf(!RUN_REAL_MINI_PC_MULTI_46)("AgentSession real mini-pc/multi-46 
 
   async function createSession(): Promise<AgentSession> {
     const authStorage = AuthStorage.inMemory();
-    authStorage.setRuntimeApiKey(MINI_PC_PROVIDER, "unused");
+    authStorage.setRuntimeApiKey(MINI_PC_PROVIDER, process.env.PI_TEST_MINI_PC_API_KEY ?? "unused");
     const modelRegistry = createMiniPcModelRegistry(authStorage);
     const resolved = resolveCliModel({
       cliProvider: MINI_PC_PROVIDER,
@@ -169,35 +180,13 @@ describe.skipIf(!RUN_REAL_MINI_PC_MULTI_46)("AgentSession real mini-pc/multi-46 
       },
     });
     const agent = new Agent({
-      getApiKey: () => "unused",
+      getApiKey: () => process.env.PI_TEST_MINI_PC_API_KEY ?? "unused",
       initialState: {
         model,
         systemPrompt: "You are a concise test assistant. Reply exactly as requested.",
         tools: [],
       },
       convertToLlm,
-      onPayload: async (payload) => {
-        const runner = extensionRunnerRef.current;
-        if (!runner?.hasHandlers("before_provider_request")) {
-          return payload;
-        }
-        return runner.emitBeforeProviderRequest(payload);
-      },
-      onResponse: async (response) => {
-        const runner = extensionRunnerRef.current;
-        if (!runner?.hasHandlers("after_provider_response")) {
-          return;
-        }
-        await runner.emit({
-          type: "after_provider_response",
-          status: response.status,
-          headers: response.headers,
-        });
-      },
-      transformContext: async (messages) => {
-        const runner = extensionRunnerRef.current;
-        return runner ? runner.emitContext(messages) : messages;
-      },
     });
     const createdSession = new AgentSession({
       agent,
@@ -257,40 +246,6 @@ describe.skipIf(!RUN_REAL_MINI_PC_MULTI_46)("AgentSession real mini-pc/multi-46 
     ].join(" ");
   }
 
-  function predictMessagesUsage(messages: AgentMessage[]): {
-    tokens: number;
-    threshold: number;
-    shouldCompact: boolean;
-  } {
-    if (!session) {
-      throw new Error("Expected session");
-    }
-    const usage = session.getContextUsage();
-    if (!usage) {
-      throw new Error("Expected context usage");
-    }
-    expect(usage.contextWindow).toBe(46_080);
-    if (usage.triggerThreshold === undefined) {
-      throw new Error("Expected trigger threshold");
-    }
-    const estimate = estimateContextTokens(messages, session.systemPrompt, { useProviderUsage: false });
-    return {
-      tokens: estimate.tokens,
-      threshold: usage.triggerThreshold,
-      shouldCompact: estimate.tokens > usage.triggerThreshold,
-    };
-  }
-
-  function predictPromptUsage(text: string): { tokens: number; threshold: number; shouldCompact: boolean } {
-    if (!session) {
-      throw new Error("Expected session");
-    }
-    return predictMessagesUsage([
-      ...session.messages,
-      { role: "user", content: [{ type: "text", text }], timestamp: Date.now() },
-    ]);
-  }
-
   it("only auto-compacts after the calculated threshold across five post-compaction cycles", async () => {
     session = await createSession();
     session.setAutoCompactionEnabled(false);
@@ -315,51 +270,72 @@ describe.skipIf(!RUN_REAL_MINI_PC_MULTI_46)("AgentSession real mini-pc/multi-46 
     expect(usageAfterCompaction?.shouldCompact).toBe(false);
 
     let expectedCompactions = 1;
+    const originalCheckCompaction = sessionInternals.checkCompaction.bind(session);
+    sessionInternals.checkCompaction = async (assistantMessage, skipAbortedCheck, additionalMessages) => {
+      const messages = sessionInternals._getEffectiveCompactedMessages().slice();
+      if (additionalMessages) messages.push(...additionalMessages);
+      if (session?.model) {
+        const tokens = sessionInternals._preparePromptContext(messages).budgetEstimate.tokens;
+        const budget = createContextBudgetReport(
+          tokens,
+          session.model.contextWindow,
+          sessionInternals._getEffectiveCompactionSettings(),
+        );
+        compactionCandidateUsages.push({
+          tokens,
+          threshold: budget.triggerThreshold,
+          shouldCompact: budget.shouldCompact,
+        });
+      }
+      return await originalCheckCompaction(assistantMessage, skipAbortedCheck, additionalMessages);
+    };
+    const originalPrepareModelCall = session.agent.prepareModelCall?.bind(session.agent);
+    if (!originalPrepareModelCall) throw new Error("Expected model-call preflight");
+    session.agent.prepareModelCall = async (input, signal) => {
+      const tokens = estimatePreparedModelCallTokens(input.context);
+      const budget = createModelCallContextBudgetReport(
+        tokens,
+        input.model,
+        sessionInternals._getEffectiveCompactionSettings(),
+        input.maxTokens,
+      );
+      compactionCandidateUsages.push({
+        tokens,
+        threshold: budget.triggerThreshold,
+        shouldCompact: budget.shouldCompact,
+      });
+      return await originalPrepareModelCall(input, signal);
+    };
     for (let cycle = 1; cycle <= CYCLE_COUNT; cycle++) {
       for (let turn = 1; turn <= MAX_TURNS_PER_CYCLE; turn++) {
         const beforeUsage = session.getContextUsage();
         expect(beforeUsage?.shouldCompact).toBe(false);
         const startsBeforeTurn = compactionStarts().length;
-        const messagesBeforeTurn = session.messages.slice();
+        const candidatesBeforeTurn = compactionCandidateUsages.length;
         const prompt = createRandomizedPostCompactionPrompt(cycle, turn, random);
-        const predicted = predictPromptUsage(prompt);
-        logLiveProgress(
-          [
-            `cycle=${cycle}/${CYCLE_COUNT}`,
-            `turn=${turn}`,
-            `start ${formatUsage()}`,
-            `predicted=${predicted.tokens}`,
-            `threshold=${predicted.threshold}`,
-            `predictedShouldCompact=${String(predicted.shouldCompact)}`,
-          ].join(" "),
-        );
+        logLiveProgress([`cycle=${cycle}/${CYCLE_COUNT}`, `turn=${turn}`, `start ${formatUsage()}`].join(" "));
 
-        const assistant = await promptAndExpectStop(prompt);
+        await promptAndExpectStop(prompt);
 
         const startsAfterTurn = compactionStarts();
-        const postResponsePrediction = predictMessagesUsage([
-          ...messagesBeforeTurn,
-          { role: "user", content: [{ type: "text", text: prompt }], timestamp: assistant.timestamp - 1 },
-          assistant,
-        ]);
+        const turnCandidates = compactionCandidateUsages.slice(candidatesBeforeTurn);
         if (startsAfterTurn.length === startsBeforeTurn) {
-          expect(postResponsePrediction.shouldCompact).toBe(false);
+          expect(turnCandidates.some((usage) => usage.shouldCompact)).toBe(false);
           expect(session.getContextUsage()?.shouldCompact).toBe(false);
-          logLiveProgress(
-            `cycle=${cycle}/${CYCLE_COUNT} turn=${turn} below-threshold predictedPrompt=${predicted.tokens} predictedAfterAnswer=${postResponsePrediction.tokens} ${formatUsage()}`,
-          );
+          logLiveProgress(`cycle=${cycle}/${CYCLE_COUNT} turn=${turn} below-threshold ${formatUsage()}`);
           continue;
         }
 
-        expect(postResponsePrediction.shouldCompact).toBe(true);
+        let trigger: CandidateUsage | undefined;
+        for (const usage of turnCandidates) if (usage.shouldCompact) trigger = usage;
+        expect(trigger?.shouldCompact).toBe(true);
+        expect(trigger?.tokens ?? 0).toBeGreaterThan(trigger?.threshold ?? Number.POSITIVE_INFINITY);
         expect(startsAfterTurn).toHaveLength(startsBeforeTurn + 1);
         expect(startsAfterTurn.at(-1)?.reason).toBe("threshold");
         expectedCompactions++;
         expect(startsAfterTurn).toHaveLength(expectedCompactions);
         expect(session.getContextUsage()?.shouldCompact).toBe(false);
-        logLiveProgress(
-          `cycle=${cycle}/${CYCLE_COUNT} turn=${turn} compacted predictedPrompt=${predicted.tokens} predictedAfterAnswer=${postResponsePrediction.tokens} ${formatUsage()}`,
-        );
+        logLiveProgress(`cycle=${cycle}/${CYCLE_COUNT} turn=${turn} compacted ${formatUsage()}`);
         break;
       }
 

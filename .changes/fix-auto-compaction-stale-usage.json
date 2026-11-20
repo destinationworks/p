@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "packages": ["coding-agent"],
+  "type": "Fixed",
+  "summary": "Base auto-compaction threshold checks on the freshly prepared prompt estimate so stale provider usage cannot immediately re-trigger compaction after a compacted turn."
+}
