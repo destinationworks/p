@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { EmbeddingError } from "./errors.ts";
 import type { EmbeddingProvider } from "./provider.ts";
+import { formatEmbeddingQuery, queryInstructionForModel } from "./query-instruction.ts";
 import { EmbeddingServerManager, type EmbeddingServerManagerOptions } from "./server.ts";
 
 export interface EmbeddingProviderHttpOptions extends EmbeddingServerManagerOptions {
@@ -8,15 +9,6 @@ export interface EmbeddingProviderHttpOptions extends EmbeddingServerManagerOpti
   maxRetries: number;
   batchSize?: number;
 }
-
-/**
- * Task instruction prepended to queries before dense encoding.
- * Aligns query representation with code-document space per Qwen recommendations.
- */
-const QUERY_INSTRUCTION =
-  "Given a natural-language description of software behaviour, " +
-  "retrieve the relevant source-code functions, types, interfaces, " +
-  "modules, and tool definitions.";
 
 const DEFAULT_HTTP_OPTIONS: EmbeddingProviderHttpOptions = {
   requestTimeoutMs: 30_000,
@@ -93,7 +85,7 @@ export class EmbeddingProviderHttp implements EmbeddingProvider {
 
   async encodeQuery(text: string, signal?: AbortSignal): Promise<Float32Array> {
     if (signal?.aborted) throw signal.reason ?? new Error("Embedding request cancelled");
-    const queryText = this.queryInstruction ? `Instruct: ${this.queryInstruction}\nQuery: ${text}` : text;
+    const queryText = formatEmbeddingQuery(this.queryInstruction, text);
     const vectors = await this.encode([queryText], signal, "interactive");
     if (!vectors[0]) throw new Error("Embedding server returned no query vector");
     return vectors[0];
@@ -211,10 +203,6 @@ export class EmbeddingProviderHttp implements EmbeddingProvider {
       return new Float32Array(row);
     });
   }
-}
-
-function queryInstructionForModel(model: string): string | undefined {
-  return model.toLowerCase().includes("qwen3-embedding") ? QUERY_INSTRUCTION : undefined;
 }
 
 function safeErrorMessage(error: unknown): string {

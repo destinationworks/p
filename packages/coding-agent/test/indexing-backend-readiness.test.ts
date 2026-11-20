@@ -215,3 +215,51 @@ async function waitFor(predicate: () => boolean): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
 }
+
+describe("indexing embedding backend readiness with a remote embedder", () => {
+  function preferRemote(agentDir: string) {
+    fs.writeFileSync(
+      path.join(agentDir, "code-rag.json"),
+      `${JSON.stringify({
+        embeddingDevice: "mps",
+        embeddingStartupTimeoutMs: 100,
+        remoteBackendsAllowed: true,
+        remoteEmbeddingUrl: "https://192.168.8.167:11450",
+        remoteEmbeddingModel: "mini-pc-2/qwen3-embedding-0.6b",
+      })}\n`,
+    );
+  }
+
+  it("does not wait for or wake the local embedding server before a remote-first search", async () => {
+    const fixture = createFixture();
+    preferRemote(fixture.agentDir);
+    const fetchImplementation = vi.fn<typeof fetch>();
+
+    await waitForIndexingEmbeddingBackend(fixture.repository, undefined, {
+      agentDir: fixture.agentDir,
+      fetchImplementation,
+    });
+
+    expect(fetchImplementation).not.toHaveBeenCalled();
+    expect(loadIndexedRepos(fixture.agentDir)[0]?.backendWakeRequest).toBeUndefined();
+  });
+
+  it("wakes and waits for the local server when the remote embedder falls back to it", async () => {
+    const fixture = createFixture();
+    preferRemote(fixture.agentDir);
+    const fetchImplementation = vi
+      .fn<typeof fetch>()
+      .mockRejectedValueOnce(new Error("connect ECONNREFUSED 127.0.0.1:18742"))
+      .mockResolvedValue(readyResponse());
+
+    await waitForIndexingEmbeddingBackend(fixture.repository, undefined, {
+      agentDir: fixture.agentDir,
+      fetchImplementation,
+      pollMs: 1,
+      localFallback: true,
+    });
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(2);
+    expect(loadIndexedRepos(fixture.agentDir)[0]?.backendWakeRequest?.id).toBeTypeOf("string");
+  });
+});

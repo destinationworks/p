@@ -9,6 +9,7 @@ import { type DelegatedMethods, installDelegatedMethods } from "../../utils/inst
 import { DEFAULT_WORKSPACE_CODE_RAG_SETTINGS, loadWorkspaceCodeRagSettings } from "../config.ts";
 import type { FilePreparationPlan } from "../file-preparation.ts";
 import { resolveQdrantEndpoint } from "../qdrant-endpoint.ts";
+import { withRemoteEmbedding } from "../remote-embedding-provider.ts";
 import type {
   CodeRagService,
   IndexManifest,
@@ -108,20 +109,7 @@ export class WorkspaceCodeRagService implements CodeRagService {
 
     this.ownsEmbeddingProvider = options.embeddingProvider === undefined;
     this.embeddingProvider =
-      options.embeddingProvider ??
-      new EmbeddingProviderHttp(
-        this.settings.embeddingServerUrl,
-        this.settings.embeddingDimensions,
-        manageLocalBackends,
-        this.settings.embeddingModel,
-        {
-          pythonExecutable: this.settings.pythonExecutable,
-          configPath: options.userConfigPath,
-          startupTimeoutMs: this.settings.embeddingStartupTimeoutMs,
-          requestTimeoutMs: this.settings.embeddingTimeoutMs,
-          batchSize: this.settings.encodeBatchSize,
-        },
-      );
+      options.embeddingProvider ?? this.createOwnedEmbeddingProvider(options, manageLocalBackends);
     this.ownsVectorStore = options.vectorStore === undefined;
     const qdrantEndpoint = resolveQdrantEndpoint(this.settings.qdrantUrl, this.settings.remoteBackendsAllowed);
     const managesLocalQdrant = manageLocalBackends && this.ownsVectorStore && qdrantEndpoint.kind === "managed-local";
@@ -143,6 +131,34 @@ export class WorkspaceCodeRagService implements CodeRagService {
         timeoutMs: this.settings.searchTimeoutMs,
         upsertBatchSize: this.settings.upsertBatchSize,
       });
+  }
+
+  private createOwnedEmbeddingProvider(
+    options: WorkspaceCodeRagServiceOptions,
+    manageLocalBackends: boolean,
+  ): EmbeddingProvider {
+    const local = new EmbeddingProviderHttp(
+      this.settings.embeddingServerUrl,
+      this.settings.embeddingDimensions,
+      manageLocalBackends,
+      this.settings.embeddingModel,
+      {
+        pythonExecutable: this.settings.pythonExecutable,
+        configPath: options.userConfigPath,
+        startupTimeoutMs: this.settings.embeddingStartupTimeoutMs,
+        requestTimeoutMs: this.settings.embeddingTimeoutMs,
+        batchSize: this.settings.encodeBatchSize,
+      },
+    );
+    try {
+      return withRemoteEmbedding(this.settings, local, { prepareFallback: options.prepareEmbeddingFallback });
+    } catch (error) {
+      this.configurationError = error instanceof Error ? error : new Error(String(error));
+      this.settings = { ...this.settings, enabled: false };
+      this.state = "unavailable";
+      this.lastError = this.errorInfo("RAG_BACKEND_UNAVAILABLE", this.configurationError.message);
+      return local;
+    }
   }
 }
 

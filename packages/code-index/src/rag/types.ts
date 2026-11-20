@@ -1,5 +1,6 @@
 import type { EmbeddingProvider } from "../embed/provider.ts";
 import type { EmbeddingRuntimeSettings } from "./embedding-settings.ts";
+import type { RemoteEmbeddingSettings } from "./remote-embedding-settings.ts";
 import type { RagVectorStore } from "./vector-types.ts";
 
 export type RagState =
@@ -218,7 +219,7 @@ export interface CodeRagService {
   dispose(): Promise<void>;
 }
 
-export interface WorkspaceCodeRagSettings extends EmbeddingRuntimeSettings {
+export interface WorkspaceCodeRagSettings extends EmbeddingRuntimeSettings, RemoteEmbeddingSettings {
   enabled: boolean;
   enableTray?: boolean;
   searchMode: "hybrid" | "bm25-only" | "dense-only";
@@ -259,6 +260,8 @@ export interface WorkspaceCodeRagServiceOptions {
   manageLocalBackends?: boolean;
   allowSearchRefresh?: boolean;
   embeddingProvider?: EmbeddingProvider;
+  /** Prepares the local embedding backend before a remote embedder falls back to it. */
+  prepareEmbeddingFallback?: (signal?: AbortSignal) => Promise<unknown>;
   vectorStore?: RagVectorStore;
   now?: () => Date;
 }

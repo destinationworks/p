@@ -19,7 +19,10 @@ export {
   type EmbeddingProvider,
   EmbeddingProviderHttp,
   EmbeddingServerManager,
+  FallbackEmbeddingProvider,
+  OrchestratorEmbeddingProvider,
   QdrantServerManager,
+  RemoteEmbeddingError,
 } from "./embed.ts";
 export { CodeIndexer } from "./indexer.ts";
 export { QdrantClient } from "./qdrant.ts";

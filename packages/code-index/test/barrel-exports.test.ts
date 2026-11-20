@@ -28,6 +28,9 @@ describe("Barrel Exports (src/index.ts and src/embed.ts)", () => {
     expect(IndexExports.CodeRagError).toBeDefined();
     expect(IndexExports.WorkspaceCodeRagService).toBeDefined();
     expect(IndexExports.QdrantVectorStore).toBeDefined();
+    expect(IndexExports.FallbackEmbeddingProvider).toBeDefined();
+    expect(IndexExports.OrchestratorEmbeddingProvider).toBeDefined();
+    expect(IndexExports.RemoteEmbeddingError).toBeDefined();
   });
 
   it("exports expected symbols from src/embed.ts", () => {
@@ -35,6 +38,9 @@ describe("Barrel Exports (src/index.ts and src/embed.ts)", () => {
     expect(EmbedExports.EmbeddingProviderHttp).toBeDefined();
     expect(EmbedExports.QdrantServerManager).toBeDefined();
     expect(EmbedExports.EmbeddingServerManager).toBeDefined();
+    expect(EmbedExports.FallbackEmbeddingProvider).toBeDefined();
+    expect(EmbedExports.OrchestratorEmbeddingProvider).toBeDefined();
+    expect(EmbedExports.RemoteEmbeddingError).toBeDefined();
     expect(EmbedExports.EMBED_MODULE_VERSION).toBe("1.0.0");
   });
 });

@@ -6,6 +6,7 @@ import {
   type RagErrorCode,
   type SemanticSearchResponse,
   WorkspaceCodeRagService,
+  type WorkspaceCodeRagServiceOptions,
 } from "@dst0/p-code-index";
 import { type Static, Type } from "typebox";
 import { getAgentDir } from "../../config.ts";
@@ -39,6 +40,26 @@ export interface SemanticSearchToolDetails {
 }
 
 const sharedServices = new Map<string, WorkspaceCodeRagService>();
+
+/**
+ * Options for the tool's repository service. It uses the daemon's backends; a
+ * remote embedder that falls back wakes the daemon's local embedding server.
+ */
+export function createSemanticSearchServiceOptions(
+  workspaceRoot: string,
+  agentDir: string,
+): WorkspaceCodeRagServiceOptions {
+  return {
+    workspaceRoot,
+    dataDirectory: path.join(agentDir, "code-rag"),
+    userConfigPath: path.join(agentDir, "code-rag.json"),
+    settings: { autoRefresh: false },
+    manageLocalBackends: false,
+    allowSearchRefresh: false,
+    prepareEmbeddingFallback: (signal) =>
+      waitForIndexingEmbeddingBackend(workspaceRoot, signal, { agentDir, localFallback: true }),
+  };
+}
 let cleanupRegistered = false;
 
 function getSharedService(cwd: string): WorkspaceCodeRagService {
@@ -46,14 +67,7 @@ function getSharedService(cwd: string): WorkspaceCodeRagService {
   const key = path.resolve(workspaceRoot);
   const existing = sharedServices.get(key);
   if (existing) return existing;
-  const service = new WorkspaceCodeRagService({
-    workspaceRoot: key,
-    dataDirectory: path.join(getAgentDir(), "code-rag"),
-    userConfigPath: path.join(getAgentDir(), "code-rag.json"),
-    settings: { autoRefresh: false },
-    manageLocalBackends: false,
-    allowSearchRefresh: false,
-  });
+  const service = new WorkspaceCodeRagService(createSemanticSearchServiceOptions(key, getAgentDir()));
   sharedServices.set(key, service);
   if (!cleanupRegistered) {
     cleanupRegistered = true;

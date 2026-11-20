@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "packages": ["coding-agent"],
+  "type": "Added",
+  "summary": "Code indexing can embed through an llm-orchestrator GPU worker (`remoteEmbeddingUrl` and `remoteEmbeddingModel` in the user's code-rag.json); while it is healthy the local embedding server stays stopped, and it takes over while the remote is busy or unavailable."
+}
