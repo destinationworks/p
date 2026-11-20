@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { RepositoryServiceState } from "./indexing-repository-service-states.ts";
 import {
   canCompileTrayLogic,
   type Json,
@@ -120,7 +121,7 @@ describe.skipIf(!canCompileTrayLogic)("macOS tray service toggle logic (compiled
 
   describe("statusHeadline", () => {
     it("reports Stopped for an unloaded service even when the status file still says it is indexing", () => {
-      const stale = status("indexing", { progress: { percent: 42 } });
+      const stale = status("updating", { progress: { phase: "indexing", percent: 42 } });
       expect(one({ kind: "headline", service: "notLoaded", processRunning: true, status: stale })).toBe(
         "Status: Stopped",
       );
@@ -133,7 +134,7 @@ describe.skipIf(!canCompileTrayLogic)("macOS tray service toggle logic (compiled
     });
 
     it("reports indexing progress and idle for a live daemon", () => {
-      const indexing = status("indexing", { progress: { percent: 42.9 } });
+      const indexing = status("updating", { progress: { phase: "indexing", percent: 42.9 } });
       expect(one({ kind: "headline", service: "loaded", processRunning: true, status: indexing })).toBe(
         "Status: Indexing alpha (42%)",
       );
@@ -169,14 +170,14 @@ describe.skipIf(!canCompileTrayLogic)("macOS tray service toggle logic (compiled
   });
 
   describe("repoStateDescription", () => {
-    const repo = (state: string): Json => (status(state).repos as Json[])[0];
+    const repo = (state: RepositoryServiceState): Json => (status(state).repos as Json[])[0];
 
     it("shows repositories as Stopped when the service is down, ignoring stale per-repo states", () => {
-      expect(one({ kind: "repoState", repo: repo("indexing"), serviceRunning: false })).toBe("Stopped (7 files)");
+      expect(one({ kind: "repoState", repo: repo("updating"), serviceRunning: false })).toBe("Stopped (7 files)");
     });
 
     it("keeps the per-repo state when the service is running", () => {
-      expect(one({ kind: "repoState", repo: repo("indexing"), serviceRunning: true })).toBe("Indexing");
+      expect(one({ kind: "repoState", repo: repo("updating"), serviceRunning: true })).toBe("Indexing");
       expect(one({ kind: "repoState", repo: repo("error"), serviceRunning: true })).toBe("Error");
       expect(one({ kind: "repoState", repo: repo("queued"), serviceRunning: true })).toBe("Queued");
       expect(one({ kind: "repoState", repo: repo("ready"), serviceRunning: true })).toBe("Ready (7 files)");

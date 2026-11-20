@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, expect } from "vitest";
+import type { RepositoryServiceState } from "./indexing-repository-service-states.ts";
 
 // Compiles the real Foundation-only Swift tray logic (models, service_state, status_headline) with the
 // JSON driver in fixtures/tray-macos/main.swift, so tray decisions are tested without AppKit.
@@ -18,7 +19,7 @@ export type Json = Record<string, unknown>;
 export const canCompileTrayLogic = process.platform === "darwin" && fs.existsSync(SWIFTC);
 
 /** A daemon status file with one repository in the given state. */
-export function trayStatus(repoState: string, extra: Json = {}): Json {
+export function trayStatus(repoState: RepositoryServiceState, extra: Json = {}): Json {
   return {
     pid: 4242,
     running: true,
