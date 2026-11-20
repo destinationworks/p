@@ -51,3 +51,34 @@ func repoStateDescription(_ repo: RepoStatusEntry, serviceRunning: Bool) -> Stri
     default: return "Ready (\(repo.indexedFiles) files)"
     }
 }
+
+/// What the menu-bar button shows.
+struct TrayButtonAppearance {
+    let isIndexing: Bool
+    let isError: Bool
+    let toolTip: String
+}
+
+func trayButtonAppearance(service: ServiceState, processRunning: Bool, status: IndexingStatusData?) -> TrayButtonAppearance {
+    let serviceRunning = service != .notLoaded && processRunning
+    let indexingRepo = serviceRunning ? status?.repos.first { $0.state == "indexing" } : nil
+    let anyError = serviceRunning && (status?.repos.contains { $0.state == "error" } ?? false)
+    let toolTip: String
+    if let repo = indexingRepo {
+        let pct = repo.progress?.percent.map { " (\(Int($0))%)" } ?? ""
+        toolTip = "Indexing: \(URL(fileURLWithPath: repo.path).lastPathComponent)\(pct)"
+    } else if service == .notLoaded {
+        toolTip = "P Code Indexing (Stopped)"
+    } else {
+        toolTip = serviceRunning ? "P Code Indexing (Idle)" : "P Code Indexing (Starting)"
+    }
+    return TrayButtonAppearance(
+        isIndexing: indexingRepo != nil, isError: service == .notLoaded || anyError, toolTip: toolTip)
+}
+
+/// Assigning an NSStatusItem image or tooltip re-renders the item and ships a new snapshot to the
+/// menu bar host even when nothing changed, so only what differs from the screen is reassigned.
+func trayButtonUpdates(shown: TrayButtonAppearance?, next: TrayButtonAppearance) -> (image: Bool, toolTip: Bool) {
+    guard let shown = shown else { return (true, true) }
+    return (shown.isIndexing != next.isIndexing || shown.isError != next.isError, shown.toolTip != next.toolTip)
+}

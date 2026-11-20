@@ -7,6 +7,7 @@ import { getAgentDir } from "./config.ts";
 import { IndexingDaemon } from "./core/indexing-daemon.ts";
 import { createIndexingDaemonOptions } from "./core/indexing-daemon-config.ts";
 import { INDEXING_SERVICE_REINSTALL_FILE } from "./core/indexing-service.ts";
+import { IndexingTrayManager } from "./core/indexing-tray-manager.ts";
 
 const REINSTALL_CONTROL_FILE = "reinstall-control.json";
 const REINSTALL_READY_FILE = "reinstall-ready.json";
@@ -51,7 +52,10 @@ export async function runIndexingService(): Promise<void> {
     `${JSON.stringify({ pid: process.pid, protocolVersion: 1, startedAt: new Date().toISOString() })}\n`,
     { mode: 0o600 },
   );
-  const daemon = new IndexingDaemon(createIndexingDaemonOptions(agentDir));
+  const daemon = new IndexingDaemon({
+    ...createIndexingDaemonOptions(agentDir),
+    trayManager: new IndexingTrayManager({ agentDir }),
+  });
   try {
     await daemon.start();
 

@@ -23,6 +23,7 @@ vi.mock("../src/core/indexing-daemon.ts", () => ({
 
 import { createIndexingDaemonOptions } from "../src/core/indexing-daemon-config.ts";
 import { computeIndexingRuntimeConfigFingerprint } from "../src/core/indexing-runtime-config.ts";
+import { IndexingTrayManager } from "../src/core/indexing-tray-manager.ts";
 import { runIndexingService } from "../src/indexing-service-daemon.ts";
 
 let temporaryDirectory: string | undefined;
@@ -116,7 +117,10 @@ describe("indexing runtime startup", () => {
 
     const running = runIndexingService();
     await vi.waitFor(() => expect(mocks.start).toHaveBeenCalledOnce());
-    expect(mocks.options).toEqual(createIndexingDaemonOptions(agentDir));
+    expect(mocks.options).toEqual({
+      ...createIndexingDaemonOptions(agentDir),
+      trayManager: expect.any(IndexingTrayManager),
+    });
     expect(terminate).toBeDefined();
     terminate?.();
     await running;

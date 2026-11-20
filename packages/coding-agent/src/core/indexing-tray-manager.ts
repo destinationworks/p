@@ -3,11 +3,25 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { getAgentDir } from "../config.ts";
+import {
+  isTrayLaunchdJobRunning,
+  type LaunchctlRunner,
+  renderTrayLaunchdPlist,
+  runLaunchctl,
+  startTrayLaunchdJob,
+  type TrayLaunchdJob,
+  trayLaunchdJob,
+} from "./indexing-tray-launchd-job.ts";
 
 export interface IndexingTrayManagerOptions {
   agentDir?: string;
   platform?: NodeJS.Platform;
   spawnProcess?: (command: string, args: string[], options: Record<string, unknown>) => ChildProcess;
+  /** macOS: runs `launchctl` for the tray's launchd job. */
+  runLaunchctl?: LaunchctlRunner;
+  uid?: number;
+  now?: () => number;
+  resolveCommand?: (agentDir: string, platform: NodeJS.Platform) => TrayCommandPlan | undefined;
 }
 
 export interface IndexingTrayService {
@@ -15,6 +29,12 @@ export interface IndexingTrayService {
   stop(): void;
   isRunning(): boolean;
 }
+
+/**
+ * After a successful macOS start, further starts within this window skip `launchctl`: the daemon
+ * calls start() on every config-file event, and each spawn blocks its throttled event loop.
+ */
+export const TRAY_LAUNCHD_RECHECK_MS = 60_000;
 
 export function isGuiDesktopAvailable(platform: NodeJS.Platform = process.platform): boolean {
   if (platform === "darwin" || platform === "win32") {
@@ -92,29 +112,47 @@ export function resolveTrayCommand(
   return undefined;
 }
 
+/**
+ * macOS: the tray is a separate launchd job (see indexing-tray-launchd-job.ts), so it is not
+ * throttled with the daemon. Linux: a detached child of the daemon inside its systemd unit.
+ */
 export class IndexingTrayManager implements IndexingTrayService {
   private readonly agentDir: string;
   private readonly platform: NodeJS.Platform;
   private readonly spawnProcess: (command: string, args: string[], options: Record<string, unknown>) => ChildProcess;
+  private readonly runLaunchctl: LaunchctlRunner;
+  private readonly uid: number;
+  private readonly now: () => number;
+  private launchdStartedAt: number | undefined;
+  private readonly resolveCommand: (agentDir: string, platform: NodeJS.Platform) => TrayCommandPlan | undefined;
   private process: ChildProcess | undefined;
 
   constructor(options: IndexingTrayManagerOptions = {}) {
     this.agentDir = options.agentDir ?? getAgentDir();
     this.platform = options.platform ?? process.platform;
     this.spawnProcess = options.spawnProcess ?? ((cmd, args, opts) => spawn(cmd, args, opts));
+    this.runLaunchctl = options.runLaunchctl ?? runLaunchctl;
+    this.uid = options.uid ?? process.getuid?.() ?? 0;
+    this.now = options.now ?? Date.now;
+    this.resolveCommand = options.resolveCommand ?? resolveTrayCommand;
+  }
+
+  private get launchdJob(): TrayLaunchdJob {
+    return trayLaunchdJob(this.agentDir, this.uid);
   }
 
   start(): boolean {
     if (!isGuiDesktopAvailable(this.platform) || !isTrayEnabled(this.agentDir)) {
       return false;
     }
-    if (this.isRunning()) {
+    if (this.platform !== "darwin" && this.isRunning()) {
       return true;
     }
-    const plan = resolveTrayCommand(this.agentDir, this.platform);
+    const plan = this.resolveCommand(this.agentDir, this.platform);
     if (!plan) {
       return false;
     }
+    if (this.platform === "darwin") return this.startLaunchdJob(plan);
     try {
       const child = this.spawnProcess(plan.command, plan.args, {
         detached: true,
@@ -138,6 +176,13 @@ export class IndexingTrayManager implements IndexingTrayService {
   }
 
   stop(): void {
+    if (this.platform === "darwin") {
+      this.launchdStartedAt = undefined;
+      // A signal, not `bootout`: during a tray-initiated service Stop the tray ignores SIGTERM,
+      // which a bootout would escalate to SIGKILL.
+      this.runLaunchctl(["kill", "TERM", this.launchdJob.target]);
+      return;
+    }
     if (!this.process) return;
     try {
       this.process.kill("SIGTERM");
@@ -147,7 +192,23 @@ export class IndexingTrayManager implements IndexingTrayService {
     this.process = undefined;
   }
 
+  private startLaunchdJob(plan: TrayCommandPlan): boolean {
+    const startedAt = this.launchdStartedAt;
+    if (startedAt !== undefined && this.now() - startedAt < TRAY_LAUNCHD_RECHECK_MS) return true;
+    const job = this.launchdJob;
+    const plist = renderTrayLaunchdPlist(job.label, [plan.command, ...plan.args], this.agentDir);
+    let started = false;
+    try {
+      started = startTrayLaunchdJob(job, plist, this.runLaunchctl);
+    } catch {
+      // An unwritable agent directory: report no tray and retry at the next call.
+    }
+    this.launchdStartedAt = started ? this.now() : undefined;
+    return started;
+  }
+
   isRunning(): boolean {
+    if (this.platform === "darwin") return isTrayLaunchdJobRunning(this.launchdJob, this.runLaunchctl);
     if (!this.process || this.process.killed || this.process.exitCode !== null) return false;
     if (typeof this.process.pid === "number" && this.process.pid > 0) {
       try {

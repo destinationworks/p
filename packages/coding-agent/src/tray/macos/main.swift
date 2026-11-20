@@ -5,7 +5,8 @@ import Foundation
 
 let agentDir = ProcessInfo.processInfo.environment["P_CODING_AGENT_DIR"]
     ?? (FileManager.default.homeDirectoryForCurrentUser.path + "/.p/agent")
-guard let _ = acquireSingleInstanceLock(agentDir: agentDir) else {
+let managedByLaunchd = ProcessInfo.processInfo.environment["P_INDEXING_TRAY_MANAGED"] == "1"
+guard let _ = acquireSingleInstanceLock(agentDir: agentDir, replacingUnmanagedHolder: managedByLaunchd) else {
     exit(0)
 }
 

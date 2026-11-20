@@ -20,6 +20,7 @@ final class IndexingStatusItemManager: NSObject, NSMenuDelegate {
     var files: FileSnapshot?
     var service: ServiceSnapshot?
     var pending: ServiceOperation?
+    private var shownAppearance: TrayButtonAppearance?
     private var fileRefreshInFlight = false
     private var fileRefreshQueuedAgain = false
     private var serviceRefreshInFlight = false
@@ -132,18 +133,15 @@ final class IndexingStatusItemManager: NSObject, NSMenuDelegate {
 
     func applyCacheToButton() {
         guard let button = statusItem.button else { return }
-        let anyIndexing = serviceRunning && (files?.status?.repos.contains { $0.state == "indexing" } ?? false)
-        let anyError = serviceRunning && (files?.status?.repos.contains { $0.state == "error" } ?? false)
-        button.image = createTrayIcon(isIndexing: anyIndexing, isError: serviceState == .notLoaded || anyError)
-        if anyIndexing {
-            let repo = files?.status?.repos.first { $0.state == "indexing" }
-            let pct = repo?.progress?.percent.map { " (\(Int($0))%)" } ?? ""
-            button.toolTip = "Indexing: \(URL(fileURLWithPath: repo?.path ?? "").lastPathComponent)\(pct)"
-        } else if serviceState == .notLoaded {
-            button.toolTip = "P Code Indexing (Stopped)"
-        } else {
-            button.toolTip = serviceRunning ? "P Code Indexing (Idle)" : "P Code Indexing (Starting)"
+        let appearance = trayButtonAppearance(service: serviceState, processRunning: processRunning, status: files?.status)
+        let updates = trayButtonUpdates(shown: shownAppearance, next: appearance)
+        if updates.image {
+            button.image = createTrayIcon(isIndexing: appearance.isIndexing, isError: appearance.isError)
         }
+        if updates.toolTip {
+            button.toolTip = appearance.toolTip
+        }
+        shownAppearance = appearance
     }
 
     // MARK: - Menu Delegate
