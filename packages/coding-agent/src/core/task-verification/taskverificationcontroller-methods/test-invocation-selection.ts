@@ -194,7 +194,12 @@ function detailedSelection(invocation: TestCommandInvocation): {
 }
 
 function matchesOption(token: string, options: ReadonlySet<string>): boolean {
-  return options.has(token) || [...options].some((option) => token.startsWith(`${option}=`));
+  if (options.has(token)) return true;
+  // Optimization: Replacing [...Set].some() with a for...of loop avoids O(N) array allocation overhead
+  for (const option of options) {
+    if (token.startsWith(`${option}=`)) return true;
+  }
+  return false;
 }
 
 function optionValue(token: string, next: string | undefined, options: ReadonlySet<string>): string | undefined {
