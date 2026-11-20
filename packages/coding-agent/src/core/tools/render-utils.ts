@@ -49,26 +49,41 @@ export function getTextOutput(
   showImages: boolean,
   showHarnessMessages = false,
 ): string {
-  if (!result) return "";
+  if (!result || !result.content || result.content.length === 0) return "";
 
-  const textBlocks = result.content.filter((c) => c.type === "text");
-  const imageBlocks = result.content.filter((c) => c.type === "image");
+  let output = "";
+  let imageIndicators = "";
 
-  let output = textBlocks.map((c) => sanitizeBinaryOutput(stripAnsi(c.text || "")).replace(/\r/g, "")).join("\n");
+  const caps = getCapabilities();
+  const shouldProcessImages = !caps.images || !showImages;
 
-  if (!showHarnessMessages) {
+  let isFirstText = true;
+  let isFirstImage = true;
+
+  for (let i = 0; i < result.content.length; i++) {
+    const c = result.content[i];
+    if (c.type === "text") {
+      if (!isFirstText) {
+        output += "\n";
+      }
+      output += sanitizeBinaryOutput(stripAnsi(c.text || "")).replace(/\r/g, "");
+      isFirstText = false;
+    } else if (c.type === "image" && shouldProcessImages) {
+      if (!isFirstImage) {
+        imageIndicators += "\n";
+      }
+      const mimeType = c.mimeType ?? "image/unknown";
+      const dims = c.data && c.mimeType ? (getImageDimensions(c.data, c.mimeType) ?? undefined) : undefined;
+      imageIndicators += imageFallback(mimeType, dims);
+      isFirstImage = false;
+    }
+  }
+
+  if (!showHarnessMessages && output) {
     output = stripHarnessMessages(output);
   }
 
-  const caps = getCapabilities();
-  if (imageBlocks.length > 0 && (!caps.images || !showImages)) {
-    const imageIndicators = imageBlocks
-      .map((img) => {
-        const mimeType = img.mimeType ?? "image/unknown";
-        const dims = img.data && img.mimeType ? (getImageDimensions(img.data, img.mimeType) ?? undefined) : undefined;
-        return imageFallback(mimeType, dims);
-      })
-      .join("\n");
+  if (imageIndicators) {
     output = output ? `${output}\n${imageIndicators}` : imageIndicators;
   }
 

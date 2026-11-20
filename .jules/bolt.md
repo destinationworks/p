@@ -33,3 +33,7 @@
 ## 2024-05-18 - Pre-compiled regex avoids array allocations from .split('/')
 **Learning:** Checking for boundary characters inside a tight string-matching loop (such as verifying file paths in `isSkippedWorkspaceEffectPath`) using `.split('/').some(...)` allocates an intermediate array and multiple substring instances on every path check. Using a single precompiled regex with bounded segments is cleaner and faster.
 **Action:** Replace `.split('/').some(...)` boundary checks with a pre-compiled regex with `(?:\/|^)` and `(?:\/|$)` boundaries. Also, correctly escape regex literals (e.g., `.` or `?`) when building patterns dynamically from static strings using `str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")`.
+
+## 2026-11-20 - Replace chained `.filter().map().join()` with explicit `for` loops in string parsing
+**Learning:** Chaining array methods like `.filter(c => c.type === "text").map(c => c.text).join("")` or `.flatMap(...).filter(...).map(...)` incurs high performance costs inside internal iterative text-parsing and serialization components due to the repeated creation of intermediate arrays and closure instances.
+**Action:** In hot text processing/rendering paths, replace long `.filter().map().join()` chains with explicit nested `for` loops and inline string concatenation to significantly reduce overhead and garbage collection pressure.
