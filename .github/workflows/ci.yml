@@ -16,10 +16,11 @@ permissions:
 jobs:
   # Picks the runner for build-check-test: the self-hosted pool, or a standard GitHub-hosted runner
   # when the pool is busy. Hosted runners are free only in a public repository, so this job (itself
-  # hosted) is skipped in a private one and build-check-test falls back to the self-hosted pool.
-  # Policy: docs/ci-runners.md.
+  # hosted) is skipped in a private one. CI_HOSTED_RUNNER_POLICY=never skips it here, before any
+  # runner is requested, so build-check-test runs on the self-hosted pool exactly as without this
+  # job and does not depend on GitHub-hosted capacity. Policy: docs/ci-runners.md.
   select-runner:
-    if: github.event.repository.private == false && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)
+    if: github.event.repository.private == false && vars.CI_HOSTED_RUNNER_POLICY != 'never' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-24.04
     timeout-minutes: 3
     permissions:

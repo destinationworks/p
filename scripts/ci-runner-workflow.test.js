@@ -34,9 +34,12 @@ test("CI grants least privilege: read-only contents, plus actions read only for 
   assert.doesNotMatch(job("build-check-test"), /permissions:/);
 });
 
-test("runner selection runs only in a public repository and only for trusted commits", () => {
+test("runner selection runs only in a public repository, only for trusted commits, and not when forced off", () => {
   const selector = job("select-runner");
-  assert.match(selector, new RegExp(`\\n {4}if: github\\.event\\.repository\\.private == false && \\(${escape(trustGate)}\\)\\n`));
+  // The never switch must sit in the job condition: evaluated there, a skipped selector needs no
+  // runner, so the self-hosted path cannot wait on GitHub-hosted capacity.
+  const condition = `github.event.repository.private == false && vars.CI_HOSTED_RUNNER_POLICY != 'never' && (${trustGate})`;
+  assert.ok(selector.includes(`\n    if: ${condition}\n`), "select-runner condition");
   assert.match(selector, new RegExp(`\\n {4}runs-on: ${escape(HOSTED_RUNNER_LABELS[0])}\\n`));
   assert.match(selector, /\n {4}timeout-minutes: [1-5]\n/);
   assert.match(selector, /\n {6}labels: \$\{\{ steps\.select\.outputs\.labels \}\}\n/);

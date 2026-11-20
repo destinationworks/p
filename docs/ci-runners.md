@@ -29,7 +29,7 @@ without a pull request:
 
 | Variable | Values | Default |
 | --- | --- | --- |
-| `CI_HOSTED_RUNNER_POLICY` | `overflow`: self-hosted first, hosted when the pool is busy. `always`: always hosted. `never`: always self-hosted. | `overflow` |
+| `CI_HOSTED_RUNNER_POLICY` | `overflow`: self-hosted first, hosted when the pool is busy. `always`: always hosted. `never`: self-hosted only; `select-runner` is skipped (see below). | `overflow` |
 | `CI_SELF_HOSTED_SLOTS` | 1–99: how many of this repository's self-hosted Linux jobs may run before new runs overflow | `2` |
 
 With `overflow`, `select-runner` reads this repository's queued and in-progress workflow runs with
@@ -47,6 +47,21 @@ Limits of this signal:
   appears.
 - Only the first 100 runs per status are read; a longer backlog is undercounted, which can only keep
   a job on the self-hosted pool.
+
+## Independent self-hosted CI
+
+Hosted runners are an addition. The full CI run on the self-hosted pool must keep working without
+GitHub-hosted capacity:
+
+- `build-check-test` is the same job, with the same steps and check name, on either runner type.
+- `CI_HOSTED_RUNNER_POLICY=never` is checked in the `if:` of `select-runner`, so the job is skipped
+  before any runner is requested. `build-check-test` then starts on the self-hosted pool at once,
+  exactly as before this change, with no dependency on GitHub-hosted runners or the selection
+  script. Use it whenever GitHub-hosted runners are unavailable.
+- With `overflow` or `always`, `build-check-test` waits for `select-runner`, which needs a
+  GitHub-hosted runner. Hosted jobs normally start within seconds, but if GitHub-hosted capacity is
+  unavailable (an incident, or all 20 concurrent hosted jobs in use) CI waits until it returns or
+  the policy is set to `never`.
 
 ## Failure behaviour
 
