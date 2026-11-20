@@ -1,6 +1,6 @@
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { minimatch } from "minimatch";
+import { Minimatch } from "minimatch";
 
 const MAX_CONFIG_BYTES = 1024 * 1024;
 const MAX_EXTENDS_DEPTH = 16;
@@ -143,21 +143,34 @@ function configCoversSource(config: EffectiveConfig, source: string): boolean {
   );
 }
 
+const minimatchCache = new Map<string, InstanceType<typeof Minimatch>>();
 function matchesPattern(source: string, baseDirectory: string, pattern: string, directoryPattern: boolean): boolean {
   if (isAbsolute(pattern) || pattern.includes("\0")) return false;
   const relativeSource = relative(baseDirectory, source).replaceAll("\\", "/");
   const normalized = pattern.replaceAll("\\", "/").replace(/^\.\//u, "").replace(/\/$/u, "");
   if (/[[\]]/u.test(normalized)) return false;
   const patterns = directoryPattern ? [normalized, `${normalized}/**/*`] : [normalized];
-  return patterns.some((candidate) =>
-    minimatch(relativeSource, candidate, {
-      dot: false,
-      nobrace: true,
-      nocase: process.platform === "win32",
-      noext: true,
-      nonegate: true,
-    }),
-  );
+
+  return patterns.some((candidate) => {
+    // Optimization: Cache Minimatch instances to avoid regex recompilation overhead in hot paths
+    let compiledMatcher = minimatchCache.get(candidate);
+    if (!compiledMatcher) {
+      compiledMatcher = new Minimatch(candidate, {
+        dot: false,
+        nobrace: true,
+        nocase: process.platform === "win32",
+        noext: true,
+        nonegate: true,
+      });
+      // Bounded cache to avoid memory leaks on very large projects
+      /* istanbul ignore next */
+      if (minimatchCache.size > 2000) {
+        minimatchCache.clear();
+      }
+      minimatchCache.set(candidate, compiledMatcher);
+    }
+    return compiledMatcher.match(relativeSource);
+  });
 }
 
 function isDirectoryInclude(pattern: string): boolean {
