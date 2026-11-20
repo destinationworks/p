@@ -10,10 +10,51 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
+  # Picks the runner for build-check-test: the self-hosted pool, or a standard GitHub-hosted runner
+  # when the pool is busy. Hosted runners are free only in a public repository, so this job (itself
+  # hosted) is skipped in a private one. CI_HOSTED_RUNNER_POLICY=never skips it here, before any
+  # runner is requested, so build-check-test runs on the self-hosted pool exactly as without this
+  # job and does not depend on GitHub-hosted capacity. Policy: docs/ci-runners.md.
+  select-runner:
+    if: github.event.repository.private == false && vars.CI_HOSTED_RUNNER_POLICY != 'never' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      labels: ${{ steps.select.outputs.labels }}
+    steps:
+      - name: Checkout selection script
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+          # package.json declares "type": "module" for the ESM selection scripts.
+          sparse-checkout: |
+            package.json
+            scripts/ci-runner-selection.js
+            scripts/select-ci-runner.js
+          sparse-checkout-cone-mode: false
+
+      - name: Select runner
+        id: select
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
+          CI_HOSTED_RUNNER_POLICY: ${{ vars.CI_HOSTED_RUNNER_POLICY }}
+          CI_SELF_HOSTED_SLOTS: ${{ vars.CI_SELF_HOSTED_SLOTS }}
+        run: node scripts/select-ci-runner.js
+
   build-check-test:
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, Linux]
+    needs: select-runner
+    # !cancelled() keeps this required check running on the self-hosted fallback when select-runner
+    # failed or was skipped; a skipped required check would otherwise report success.
+    if: ${{ !cancelled() && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: ${{ fromJSON(needs.select-runner.outputs.labels || '["self-hosted","Linux"]') }}
     timeout-minutes: 30
     steps:
       - name: Checkout
@@ -26,12 +67,23 @@ jobs:
         with:
           node-version: 22
 
+      - name: Install ripgrep on GitHub-hosted runner
+        if: runner.environment == 'github-hosted'
+        shell: bash
+        run: |
+          # GitHub-hosted runners grant passwordless sudo; the self-hosted pool never does, so package
+          # installation is limited to hosted runners.
+          if ! command -v rg >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends ripgrep
+          fi
+
       - name: Verify runner prerequisites
         shell: bash
         run: |
-          # The runner user has no privilege escalation, so never install packages here. Without
-          # ripgrep on PATH the grep tool tests fall back to an unauthenticated GitHub download, so
-          # require it up front. cairo/pango headers only matter for compiling `canvas`, which
+          # The self-hosted runner user has no privilege escalation, so never install packages
+          # here. Without ripgrep on PATH the grep tool tests fall back to an unauthenticated GitHub
+          # download, so require it up front. cairo/pango headers only matter for compiling `canvas`, which
           # `npm ci --ignore-scripts` never builds.
           if ! command -v rg >/dev/null 2>&1; then
             echo "::error title=Missing runner prerequisite::ripgrep (rg) is not on PATH. This job cannot install packages (no sudo); ask the runner administrator to preinstall ripgrep."

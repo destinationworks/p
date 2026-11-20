@@ -1,0 +1,31 @@
+# 2026-11-21 — Hosted-runner overflow: public repositories have no minute quota, and a skipped required check passes
+
+- **Status:** Resolved
+- **Task/context:** Pull requests in `destinationworks/p` queued behind the self-hosted Linux pool. The request was to use GitHub-hosted runners as extra capacity, but only within the free Actions limit.
+- **Unexpected observation or failure:** The premise of a monthly minute budget did not apply to this repository. A dynamic `runs-on` driven by a preflight job also risked silently disabling the required check.
+- **Evidence:**
+  - `gh api repos/destinationworks/p` reports `visibility: public`. The organization and the maintainer's personal account are on the Free plan.
+  - The legacy endpoint `/orgs/{org}/settings/billing/actions` now returns HTTP 410. The enhanced billing endpoints `/organizations/{org}/settings/billing/usage` and `.../usage/summary` work with the `read:org` scope and itemize usage per repository with `grossAmount`, `discountAmount` and `netAmount`.
+  - For November 2026 every hosted minute of `p` was fully discounted. A public repository on the maintainer's Free personal account used about 10,500 hosted Linux minutes against 2,000 included with `netAmount` 0, so public-repository minutes do not consume the included quota. GitHub's docs state the same and cap Free-plan concurrency at 20 standard hosted jobs.
+  - Self-hosted queue waits over the last 30 `ci.yml` runs were usually 3 seconds but reached 1.5–8 minutes when several pull requests were pushed together, and about 50 minutes on 2026-10-31 when one runner served the repository.
+  - The `main` ruleset requires the `build-check-test` status. GitHub reports a job skipped by its `if:` as successful, so a required job that `needs:` a failed preflight would let a pull request merge without CI.
+  - `GITHUB_TOKEN` cannot be granted `administration` permission, so a workflow cannot list self-hosted runners; it can read this repository's runs and jobs with `actions: read`.
+- **Approaches tried:**
+  - **Attempt:** Budget guard that reads billing usage and stops hosted runs near the included quota.
+    - **Outcome:** Rejected.
+    - **Why:** The quota does not apply to a public repository, and reading billing needs an organization-admin token in a secret available to every same-repository pull request workflow.
+  - **Attempt:** Move all CI to `ubuntu-latest`.
+    - **Outcome:** Rejected as the default; kept as `CI_HOSTED_RUNNER_POLICY=always`.
+    - **Why:** It leaves the self-hosted pool idle, and the request was extra capacity.
+  - **Attempt:** Watchdog that cancels a queued self-hosted job and re-dispatches it on a hosted runner.
+    - **Outcome:** Rejected.
+    - **Why:** Needs `actions: write`, re-dispatch plumbing and duplicate check handling for a small gain over a preflight.
+  - **Attempt:** Hosted preflight job that counts this repository's self-hosted jobs and overflows to `ubuntu-24.04`.
+    - **Outcome:** Worked.
+    - **Why:** No secret, read-only token, self-hosted stays primary, and the decision is visible in the step summary.
+- **Root cause:** Minute quotas apply only to private repositories; the real constraint here was self-hosted capacity. Separately, a required job whose dependency fails is skipped and reported as success unless its condition uses a status function.
+- **Resolution:** `.github/workflows/ci.yml` adds `select-runner` (skipped unless the repository is public) running `scripts/select-ci-runner.js`. `build-check-test` uses `if: ${{ !cancelled() && ... }}` and `runs-on: ${{ fromJSON(needs.select-runner.outputs.labels || '["self-hosted","Linux"]') }}`, so a failed or skipped selector falls back to the self-hosted pool. `CI_HOSTED_RUNNER_POLICY=never` is evaluated in the selector's job `if:`, so it is skipped without requesting a runner and self-hosted CI keeps running independently of GitHub-hosted capacity, which the maintainer required. Hosted runners install ripgrep in a step guarded by `runner.environment == 'github-hosted'`. Policy and variables are documented in `docs/ci-runners.md`.
+- **Verification:** `scripts/ci-runner-selection.test.js`, `scripts/select-ci-runner.test.js` (spawns the CLI against a local HTTP API) and `scripts/ci-runner-workflow.test.js`; real CI runs on the pull request, recorded in its description.
+- **Prevention/follow-up:** `AGENTS.md` now limits hosted runners to free standard labels in public repositories and requires the `!cancelled()` fallback for a required job behind a preflight. A private repository with self-hosted-only CI (for example the maintainer's orchestrator repository) needs a real quota guard if it ever adopts hosted runners.
+- **Reusable learning:** Before designing around an Actions minute budget, check repository visibility and the enhanced billing usage API: public repositories have no minute quota, only a concurrency cap. A required job behind a preflight must use `!cancelled()` and a literal fallback, or a preflight failure turns into a passing check. A preflight on another runner type makes the dependent job wait for that runner's capacity (queue time is not bounded by `timeout-minutes`); put any kill switch in the preflight's job-level `if:` so turning it off removes the dependency.
+- **References:** `.github/workflows/ci.yml`, `scripts/ci-runner-selection.js`, `scripts/select-ci-runner.js`, `docs/ci-runners.md`, [Actions limits](https://docs.github.com/en/actions/reference/limits).
