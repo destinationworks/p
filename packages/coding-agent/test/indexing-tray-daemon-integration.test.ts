@@ -145,6 +145,101 @@ describe("indexing daemon tray integration", () => {
       expect(tray.stop).not.toHaveBeenCalled();
     });
   });
+  describe("tray start during daemon start", () => {
+    function makeStartableDaemon(tray: IndexingTrayService): IndexingDaemon {
+      const qdrantDataDirectory = path.join(tempDir, "qdrant");
+      // A persisted collection makes start() run Qdrant maintenance before the registry sync.
+      fs.mkdirSync(path.join(qdrantDataDirectory, "storage", "collections", "persisted"), { recursive: true });
+      const daemon = new IndexingDaemon({
+        agentDir: tempDir,
+        qdrantBinary: "unused",
+        qdrantDataDirectory,
+        pythonExecutable: "unused",
+        embeddingModel: "unused",
+        trayManager: tray,
+        disposeBackends: async () => {},
+      });
+      vi.spyOn(daemon, "watchRegistry").mockImplementation(() => {});
+      vi.spyOn(daemon, "writeStatus").mockImplementation(() => {});
+      return daemon;
+    }
+
+    function deferred(): { promise: Promise<void>; resolve: () => void } {
+      let resolve = () => {};
+      const promise = new Promise<void>((settle) => {
+        resolve = settle;
+      });
+      return { promise, resolve };
+    }
+
+    it("starts the tray before Qdrant maintenance and the registry sync finish", async () => {
+      // After a restart the sync took minutes (Qdrant startup plus every repository), and the
+      // tray only appeared once it finished.
+      const tray = makeTray();
+      const daemon = makeStartableDaemon(tray);
+      expect(daemon.collectQdrantGarbageOnStart).toBe(true);
+      const maintenance = deferred();
+      const sync = deferred();
+      vi.spyOn(daemon, "startQdrantMaintenance").mockReturnValue(maintenance.promise);
+      const syncRegistry = vi.spyOn(daemon, "syncRegistry").mockReturnValue(sync.promise);
+      const starting = daemon.start();
+      try {
+        expect(tray.start).toHaveBeenCalledOnce();
+        maintenance.resolve();
+        await vi.waitFor(() => expect(syncRegistry).toHaveBeenCalledOnce());
+        expect(daemon.writeStatus).not.toHaveBeenCalled();
+        sync.resolve();
+        await starting;
+        expect(tray.start).toHaveBeenCalledOnce();
+        expect(daemon.writeStatus).toHaveBeenCalled();
+        expect(tray.stop).not.toHaveBeenCalled();
+      } finally {
+        maintenance.resolve();
+        sync.resolve();
+        await daemon.stop();
+      }
+      expect(tray.stop).toHaveBeenCalledOnce();
+    });
+
+    it.each(["tray start", "Qdrant maintenance", "registry sync"] as const)(
+      "stops the tray and releases the lock when the %s fails",
+      async (failingStep) => {
+        const tray = makeTray();
+        const failure = new Error(`${failingStep} failed`);
+        if (failingStep === "tray start") {
+          tray.start.mockImplementation(() => {
+            throw failure;
+          });
+        }
+        const daemon = makeStartableDaemon(tray);
+        const maintenance = vi.spyOn(daemon, "startQdrantMaintenance");
+        if (failingStep === "Qdrant maintenance") maintenance.mockRejectedValue(failure);
+        else maintenance.mockResolvedValue(undefined);
+        const syncRegistry = vi.spyOn(daemon, "syncRegistry");
+        if (failingStep === "registry sync") syncRegistry.mockRejectedValue(failure);
+        else syncRegistry.mockResolvedValue(undefined);
+        await expect(daemon.start()).rejects.toBe(failure);
+        expect(tray.start).toHaveBeenCalledOnce();
+        expect(tray.stop).toHaveBeenCalledOnce();
+        expect(syncRegistry).toHaveBeenCalledTimes(failingStep === "registry sync" ? 1 : 0);
+        expect(fs.existsSync(path.join(tempDir, "indexing-service", "daemon.lock"))).toBe(false);
+      },
+    );
+
+    it("leaves the tray alone when another daemon holds the lock", async () => {
+      // The running daemon owns the tray: a second instance must neither start nor stop it.
+      const lockPath = path.join(tempDir, "indexing-service", "daemon.lock");
+      fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+      fs.writeFileSync(lockPath, JSON.stringify({ pid: process.pid, token: "running-daemon" }));
+      const tray = makeTray();
+      const daemon = makeStartableDaemon(tray);
+      await expect(daemon.start()).rejects.toThrow(`already running with pid ${process.pid}`);
+      expect(tray.start).not.toHaveBeenCalled();
+      expect(tray.stop).not.toHaveBeenCalled();
+      expect(JSON.parse(fs.readFileSync(lockPath, "utf8")).token).toBe("running-daemon");
+    });
+  });
+
   describe("tray ownership", () => {
     it("a daemon constructed without a tray manager never launches a tray, even with one installed", () => {
       // Only the service entry point wires the real tray. Library and test daemons used to spawn

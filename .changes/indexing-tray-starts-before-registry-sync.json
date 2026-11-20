@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "packages": ["coding-agent"],
+  "type": "Fixed",
+  "summary": "The indexing menu-bar and system tray item appears as soon as the indexing daemon restarts, showing \"Starting...\", instead of minutes later once Qdrant and every repository have been initialised."
+}
