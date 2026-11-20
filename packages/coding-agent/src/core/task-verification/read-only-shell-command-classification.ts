@@ -24,6 +24,26 @@ const CONFIDENTLY_READ_ONLY_SHELL_COMMANDS = new Set([
   "which",
 ]);
 const DISCOVERY_ONLY_SHELL_COMMANDS = new Set(["cd"]);
+// Discovery-only toolchain probes: `<tool> <flag>` with exactly that one argument prints a version and exits.
+// Short flags are listed only where the tool documents them as version flags (`python -v` is verbose). yarn, pnpm,
+// cargo and rustc are deliberately absent: `.yarnrc.yml` yarnPath, packageManager self-switching and
+// rust-toolchain.toml path toolchains let the workspace choose which program `--version` runs.
+const LONG_VERSION = ["--version"];
+const DISCOVERY_VERSION_PROBE_FLAGS = new Map<string, ReadonlySet<string>>([
+  ["node", new Set([...LONG_VERSION, "-v"])],
+  ["npm", new Set([...LONG_VERSION, "-v"])],
+  ["npx", new Set(LONG_VERSION)],
+  ["bun", new Set([...LONG_VERSION, "-v"])],
+  ["deno", new Set([...LONG_VERSION, "-V"])],
+  ["python", new Set([...LONG_VERSION, "-V"])],
+  ["python3", new Set([...LONG_VERSION, "-V"])],
+  ["pip", new Set([...LONG_VERSION, "-V"])],
+  ["pip3", new Set([...LONG_VERSION, "-V"])],
+  ["uv", new Set([...LONG_VERSION, "-V"])],
+  ["go", new Set(["version"])],
+  ["git", new Set(LONG_VERSION)],
+  ["tsc", new Set([...LONG_VERSION, "-v"])],
+]);
 const CONFIDENTLY_READ_ONLY_GIT_SUBCOMMANDS = new Set(["diff", "log", "show", "status"]);
 const DISCOVERY_ONLY_GIT_SUBCOMMANDS = new Set(["ls-files", "rev-parse"]);
 // Global git options that cannot change what the subcommand reads or writes. `-c`, `--git-dir`, `--work-tree`,
@@ -92,6 +112,7 @@ function isConfidentlyReadOnlyShellWords(words: readonly string[], discovery: bo
     return subcommand === "list" || subcommand === "info";
   }
   if (name === "mount") return words.length === 1;
+  if (discovery && words.length === 2 && DISCOVERY_VERSION_PROBE_FLAGS.get(name)?.has(words[1]!)) return true;
   if (name === "git") return isConfidentlyReadOnlyGitInvocation(words, discovery);
   return CONFIDENTLY_READ_ONLY_SHELL_COMMANDS.has(name) || (discovery && DISCOVERY_ONLY_SHELL_COMMANDS.has(name));
 }
