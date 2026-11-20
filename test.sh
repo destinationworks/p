@@ -7,6 +7,11 @@ if [[ "$NPM_TEST_SCRIPT" != "test" && "$NPM_TEST_SCRIPT" != "test:coverage" ]]; 
     exit 2
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+
+# Fail before touching auth.json when this checkout lacks the workspace build output the suite loads.
+node "$SCRIPT_DIR/scripts/check-test-dist.js"
+
 AUTH_FILE="$HOME/.p/agent/auth.json"
 AUTH_BACKUP="$HOME/.p/agent/auth.json.bak"
 

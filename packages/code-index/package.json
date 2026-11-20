@@ -27,7 +27,7 @@
     "clean": "node ../../scripts/workspace-file-operations.js clean",
     "build": "tsgo -p tsconfig.build.json",
     "benchmark:mps-precision": "node benchmarks/mps-precision/run.js",
-    "test": "vitest --run && python3 -m unittest discover -s test -p 'test_*.py'",
+    "test": "vitest --run && node ../../scripts/code-index-python-tests.js",
     "test:coverage": "vitest --run --coverage",
     "prepublishOnly": "npm run clean && npm run build"
   },
