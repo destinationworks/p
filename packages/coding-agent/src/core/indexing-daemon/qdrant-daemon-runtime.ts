@@ -77,11 +77,8 @@ export function createQdrantDaemonRuntime(options: CreateQdrantDaemonRuntimeOpti
         await remoteAdmin?.listCollections();
         return;
       }
-      const started = await manager.ensureStarted(signal);
-      if (!started && !(await manager.isOwnedServerHealthy())) {
-        options.onLog("debug", "Skipping Qdrant collection GC because local storage ownership is unproven");
-        return;
-      }
+      await manager.ensureStarted(signal);
+      // The collector proves ownership itself before every pass, so the probe stays off the indexing path.
       void garbageCollector.start().catch((error: unknown) => {
         const message = error instanceof Error ? error.message : String(error);
         options.onLog("error", `Qdrant collection GC failed to start: ${message}`);

@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   collectObsoleteQdrantCollections,
   QDRANT_COLLECTION_GC_INTERVAL_MS,
+  QDRANT_COLLECTION_GC_OWNERSHIP_RETRY_MS,
   QdrantCollectionGarbageCollector,
 } from "../src/core/indexing-daemon/qdrant-collection-garbage-collector.ts";
 import { createQdrantDaemonRuntime } from "../src/core/indexing-daemon/qdrant-daemon-runtime.ts";
@@ -45,6 +46,7 @@ describe("Qdrant garbage collection failure contracts", () => {
     const result = await collectObsoleteQdrantCollections({
       dataDirectory,
       collectionPrefix: "p_code_chunks",
+      readLiveRepositories: () => [],
       now: () => now,
       collectionAdmin: {
         listCollections: async () => [failed, young, malformed, boundary],
@@ -64,6 +66,7 @@ describe("Qdrant garbage collection failure contracts", () => {
       collectObsoleteQdrantCollections({
         dataDirectory: path.join(parentDirectory, "missing"),
         collectionPrefix: "p_code_chunks",
+        readLiveRepositories: () => [],
         collectionAdmin: { listCollections, deleteCollection: async () => {} },
       }),
     ).rejects.toMatchObject({
@@ -89,6 +92,7 @@ describe("Qdrant garbage collection failure contracts", () => {
       collectObsoleteQdrantCollections({
         dataDirectory,
         collectionPrefix: "p_code_chunks",
+        readLiveRepositories: () => [],
         collectionAdmin: { listCollections, deleteCollection: async () => {} },
       }),
     ).rejects.toMatchObject({
@@ -109,6 +113,7 @@ describe("Qdrant garbage collection failure contracts", () => {
       collectObsoleteQdrantCollections({
         dataDirectory,
         collectionPrefix: "p_code_chunks",
+        readLiveRepositories: () => [],
         collectionAdmin: { listCollections, deleteCollection: async () => {} },
       }),
     ).rejects.toMatchObject({
@@ -137,6 +142,33 @@ describe("Qdrant garbage collection failure contracts", () => {
     await vi.advanceTimersByTimeAsync(QDRANT_COLLECTION_GC_INTERVAL_MS);
     expect(collect).toHaveBeenCalledTimes(3);
     expect(onLog).toHaveBeenCalledWith("debug", "Qdrant collection GC deleted 0, retained 0, failed 0");
+    await garbageCollector.stop();
+  });
+
+  it("retries a pass skipped for unproven ownership long before the next daily run", async () => {
+    vi.useFakeTimers();
+    const collect = vi.fn().mockResolvedValue({ deleted: 0, failed: 0, retained: 0 });
+    const isOwnedStorage = vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true);
+    const onLog = vi.fn();
+    const garbageCollector = new QdrantCollectionGarbageCollector(collect, onLog, isOwnedStorage);
+
+    await garbageCollector.start();
+    expect(collect).not.toHaveBeenCalled();
+    expect(onLog).toHaveBeenCalledWith(
+      "debug",
+      "Skipping Qdrant collection GC because local storage ownership is unproven",
+    );
+    expect(QDRANT_COLLECTION_GC_OWNERSHIP_RETRY_MS).toBeLessThan(QDRANT_COLLECTION_GC_INTERVAL_MS / 24);
+
+    await vi.advanceTimersByTimeAsync(QDRANT_COLLECTION_GC_OWNERSHIP_RETRY_MS - 1);
+    expect(collect).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(collect).toHaveBeenCalledOnce();
+
+    await vi.advanceTimersByTimeAsync(QDRANT_COLLECTION_GC_INTERVAL_MS - 1);
+    expect(collect).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(collect).toHaveBeenCalledTimes(2);
     await garbageCollector.stop();
   });
 

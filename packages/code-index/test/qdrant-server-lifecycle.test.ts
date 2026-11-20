@@ -127,4 +127,32 @@ describe("qdrant server manager lifecycle and client batching", () => {
       fs.rmSync(dataDirectory, { force: true, recursive: true });
     }
   });
+
+  it("keeps proving ownership when a loaded server answers after the readiness probe timeout", async () => {
+    const dataDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "p-qdrant-owned-slow-"));
+    fs.writeFileSync(path.join(dataDirectory, "qdrant.key"), "owned-test-key\n", { mode: 0o600 });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
+      (_input, init) =>
+        new Promise<Response>((resolve, reject) => {
+          const authorized = new Headers(init?.headers).get("api-key") === "owned-test-key";
+          const timer = setTimeout(
+            () => resolve(authorized ? Response.json({ status: "ok" }) : new Response("Unauthorized", { status: 401 })),
+            authorized ? 0 : 2_500,
+          );
+          init?.signal?.addEventListener("abort", () => {
+            clearTimeout(timer);
+            reject(init.signal?.reason);
+          });
+        }),
+    );
+    const manager = new QdrantServerManager(9999, { dataDirectory });
+
+    try {
+      await expect(manager.isOwnedServerHealthy()).resolves.toBe(true);
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    } finally {
+      fetchSpy.mockRestore();
+      fs.rmSync(dataDirectory, { force: true, recursive: true });
+    }
+  });
 });

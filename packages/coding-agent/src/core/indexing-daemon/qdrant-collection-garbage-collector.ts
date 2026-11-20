@@ -3,11 +3,17 @@ import path from "node:path";
 import {
   DEFAULT_WORKSPACE_CODE_RAG_SETTINGS,
   getQdrantCollectionCreatedAt,
-  getRepositoryRefreshLockState,
   QdrantCollectionAdmin,
 } from "@dst0/p-code-index";
+import {
+  type LiveRepository,
+  readCollectionProtectionSnapshot,
+  readLiveRepositories,
+} from "./qdrant-collection-protection.ts";
 
 export const QDRANT_COLLECTION_GC_INTERVAL_MS = 24 * 60 * 60_000;
+/** A probe that times out under load must not postpone collection for a whole day. */
+export const QDRANT_COLLECTION_GC_OWNERSHIP_RETRY_MS = 15 * 60_000;
 
 export interface QdrantCollectionGcResult {
   deleted: number;
@@ -19,6 +25,7 @@ interface CollectObsoleteQdrantCollectionsOptions {
   dataDirectory: string;
   collectionPrefix: string;
   collectionAdmin: Pick<QdrantCollectionAdmin, "listCollections" | "deleteCollection">;
+  readLiveRepositories: () => LiveRepository[];
   canDeleteCollections?: () => boolean;
   now?: () => number;
 }
@@ -31,11 +38,6 @@ interface CreateQdrantCollectionGarbageCollectorOptions {
   isOwnedStorage: () => Promise<boolean>;
   canDeleteCollections: () => boolean;
   onLog: (level: "debug" | "error", message: string) => void;
-}
-
-interface CollectionProtectionSnapshot {
-  collections: Set<string>;
-  refreshInProgress: boolean;
 }
 
 export class QdrantCollectionGarbageCollector {
@@ -59,9 +61,11 @@ export class QdrantCollectionGarbageCollector {
   async start(): Promise<void> {
     if (this.stopped || this.timer) return;
     if (this.runPromise) return this.runPromise;
+    let nextRunDelayMs = QDRANT_COLLECTION_GC_INTERVAL_MS;
     const operation = (async () => {
       if (this.isOwnedStorage && !(await this.isOwnedStorage())) {
         this.onLog?.("debug", "Skipping Qdrant collection GC because local storage ownership is unproven");
+        nextRunDelayMs = QDRANT_COLLECTION_GC_OWNERSHIP_RETRY_MS;
         return;
       }
       if (this.stopped) return;
@@ -77,7 +81,7 @@ export class QdrantCollectionGarbageCollector {
       })
       .finally(() => {
         if (this.runPromise === operation) this.runPromise = undefined;
-        this.schedule();
+        this.schedule(nextRunDelayMs);
       });
     this.runPromise = operation;
     return operation;
@@ -90,12 +94,12 @@ export class QdrantCollectionGarbageCollector {
     await this.runPromise;
   }
 
-  private schedule(): void {
+  private schedule(delayMs: number): void {
     if (this.stopped || this.timer) return;
     this.timer = setTimeout(() => {
       this.timer = undefined;
       void this.start();
-    }, QDRANT_COLLECTION_GC_INTERVAL_MS);
+    }, delayMs);
   }
 }
 
@@ -114,6 +118,7 @@ export function createQdrantCollectionGarbageCollector(
         dataDirectory: path.join(options.agentDir, "code-rag"),
         collectionPrefix: options.collectionPrefix,
         collectionAdmin,
+        readLiveRepositories: () => readLiveRepositories(options.agentDir),
         canDeleteCollections: options.canDeleteCollections,
       });
     },
@@ -125,9 +130,9 @@ export function createQdrantCollectionGarbageCollector(
 export async function collectObsoleteQdrantCollections(
   options: CollectObsoleteQdrantCollectionsOptions,
 ): Promise<QdrantCollectionGcResult> {
-  const before = readCollectionProtectionSnapshot(options.dataDirectory);
+  const before = readCollectionProtectionSnapshot(options.dataDirectory, options.readLiveRepositories());
   const collections = await options.collectionAdmin.listCollections();
-  const after = readCollectionProtectionSnapshot(options.dataDirectory);
+  const after = readCollectionProtectionSnapshot(options.dataDirectory, options.readLiveRepositories());
   const protectedCollections = new Set([...before.collections, ...after.collections]);
   const now = options.now?.() ?? Date.now();
   const result: QdrantCollectionGcResult = { deleted: 0, failed: 0, retained: 0 };
@@ -156,48 +161,6 @@ export async function collectObsoleteQdrantCollections(
     }
   }
   return result;
-}
-
-function readCollectionProtectionSnapshot(dataDirectory: string): CollectionProtectionSnapshot {
-  const collections = new Set<string>();
-  let refreshInProgress = false;
-  let entries: fs.Dirent[];
-  try {
-    entries = fs.readdirSync(dataDirectory, { withFileTypes: true });
-  } catch (error) {
-    throw new Error("Cannot safely enumerate persisted Qdrant collection references", { cause: error });
-  }
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const repositoryDirectory = path.join(dataDirectory, entry.name);
-    if (getRepositoryRefreshLockState(repositoryDirectory) === "active") refreshInProgress = true;
-    for (const filename of ["manifest.json", "rebuild-checkpoint.json"]) {
-      const collection = readCollectionReference(path.join(repositoryDirectory, filename));
-      if (collection) collections.add(collection);
-    }
-  }
-  return { collections, refreshInProgress };
-}
-
-function readCollectionReference(filePath: string): string | undefined {
-  let contents: string;
-  try {
-    contents = fs.readFileSync(filePath, "utf8");
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") return undefined;
-    throw new Error("Cannot safely read Qdrant collection reference", { cause: error });
-  }
-  try {
-    const value = JSON.parse(contents) as unknown;
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-      throw new Error("Collection reference is not an object");
-    }
-    const collection = (value as { collection?: unknown }).collection;
-    if (typeof collection !== "string" || collection.length === 0) throw new Error("Collection name is missing");
-    return collection;
-  } catch (error) {
-    throw new Error("Cannot safely read Qdrant collection reference", { cause: error });
-  }
 }
 
 export function hasPersistedQdrantCollections(qdrantDataDirectory: string): boolean {

@@ -44,6 +44,10 @@ describe("Qdrant collection garbage collection", () => {
       dataDirectory: temporaryDirectory,
       collectionPrefix: prefix,
       now: () => now,
+      readLiveRepositories: () => [
+        { root: "/work/active", repositoryId: "repo-active" },
+        { root: "/work/rebuild", repositoryId: "repo-rebuild" },
+      ],
       collectionAdmin: {
         listCollections: async () => [active, resumable, oldOrphan, youngOrphan, foreign],
         deleteCollection: async (name) => {
@@ -69,6 +73,7 @@ describe("Qdrant collection garbage collection", () => {
       collectObsoleteQdrantCollections({
         dataDirectory: temporaryDirectory,
         collectionPrefix: "p_code_chunks",
+        readLiveRepositories: () => [],
         now: () => now,
         collectionAdmin: {
           listCollections: async () => [orphan],
@@ -88,6 +93,7 @@ describe("Qdrant collection garbage collection", () => {
     const result = await collectObsoleteQdrantCollections({
       dataDirectory: temporaryDirectory,
       collectionPrefix: "p_code_chunks",
+      readLiveRepositories: () => [],
       canDeleteCollections: () => false,
       now: () => now,
       collectionAdmin: {
@@ -115,6 +121,7 @@ describe("Qdrant collection garbage collection", () => {
     const result = await collectObsoleteQdrantCollections({
       dataDirectory: temporaryDirectory,
       collectionPrefix: "p_code_chunks",
+      readLiveRepositories: () => [],
       canDeleteCollections: () => canDelete,
       now: () => now,
       collectionAdmin: { listCollections: async () => [first, second], deleteCollection },
@@ -136,6 +143,7 @@ describe("Qdrant collection garbage collection", () => {
     const result = await collectObsoleteQdrantCollections({
       dataDirectory: temporaryDirectory,
       collectionPrefix: "p_code_chunks",
+      readLiveRepositories: () => [],
       now: () => now,
       collectionAdmin: {
         listCollections: async () => {
@@ -166,6 +174,7 @@ describe("Qdrant collection garbage collection", () => {
       dataDirectory: temporaryDirectory,
       collectionPrefix: "p_code_chunks",
       now: () => now,
+      readLiveRepositories: () => [{ root: "/work/repo", repositoryId: "a".repeat(64) }],
       collectionAdmin: {
         listCollections: async () => {
           writeCollectionReference(repositoryDirectory, "manifest.json", newCollection);
@@ -188,6 +197,7 @@ describe("Qdrant collection garbage collection", () => {
     const result = await collectObsoleteQdrantCollections({
       dataDirectory: temporaryDirectory,
       collectionPrefix: "p_code_chunks",
+      readLiveRepositories: () => [],
       now: () => now,
       collectionAdmin: {
         listCollections: async () => [lookalike],

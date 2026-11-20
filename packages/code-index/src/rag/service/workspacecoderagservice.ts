@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { BM25Vocabulary } from "../../bm25.ts";
-import { getGitInfo } from "../../discover.ts";
 import { EmbeddingProviderHttp } from "../../embed/http.ts";
 import type { EmbeddingProvider } from "../../embed/provider.ts";
 import { QdrantServerManager } from "../../embed/qdrant-server.ts";
@@ -9,6 +8,7 @@ import { type DelegatedMethods, installDelegatedMethods } from "../../utils/inst
 import { DEFAULT_WORKSPACE_CODE_RAG_SETTINGS, loadWorkspaceCodeRagSettings } from "../config.ts";
 import type { FilePreparationPlan } from "../file-preparation.ts";
 import { resolveQdrantEndpoint } from "../qdrant-endpoint.ts";
+import { computeRepositoryId } from "../repository-id.ts";
 import type {
   CodeRagService,
   IndexManifest,
@@ -20,7 +20,6 @@ import type {
   WorkspaceCodeRagSettings,
 } from "../types.ts";
 import { QdrantVectorStore } from "../vector-store.ts";
-import { hashText } from "./helpers.ts";
 import * as filePreparationDelegates from "./workspacecoderagservice-methods/file-preparation.ts";
 import * as incrementalRefreshDelegates from "./workspacecoderagservice-methods/incremental-refresh.ts";
 import * as lifecycleDelegates from "./workspacecoderagservice-methods/lifecycle.ts";
@@ -89,8 +88,7 @@ export class WorkspaceCodeRagService implements CodeRagService {
     this.workspaceRoot = fs.realpathSync(options.workspaceRoot);
     const workspaceStat = fs.statSync(this.workspaceRoot);
     if (!workspaceStat.isDirectory()) throw new Error(`Code RAG workspace is not a directory: ${this.workspaceRoot}`);
-    const gitInfo = getGitInfo(this.workspaceRoot);
-    this.repoId = hashText(`${this.workspaceRoot}\0${gitInfo.remote}`);
+    this.repoId = computeRepositoryId(this.workspaceRoot);
     this.repositoryDirectory = path.join(options.dataDirectory, this.repoId);
     this.manifestPath = path.join(this.repositoryDirectory, "manifest.json");
     this.now = options.now ?? (() => new Date());
