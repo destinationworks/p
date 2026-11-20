@@ -16,6 +16,7 @@ import { StoredPointError } from "../../vector-store.ts";
 import { CodeRagError } from "../coderagerror.ts";
 import { SCROLL_PROGRESS_INTERVAL } from "../constants.ts";
 import { retrievalTextForPayload, unlinkBestEffort, waitForSignal } from "../helpers.ts";
+import { discardPendingFileCleanup } from "../pending-file-cleanup.ts";
 import { ReusableGenerationError } from "../reusablegenerationerror.ts";
 import type { PreparedFile, RefreshPlan } from "../types.ts";
 import type { WorkspaceCodeRagService } from "../workspacecoderagservice.ts";
@@ -227,6 +228,8 @@ export async function do_performSparseGenerationRefresh(
         chunkCount: totalChunks,
       };
       writeManifestAtomic(self.manifestPath, manifest);
+      // The copy skipped every version the old manifest did not reference, so in-place leftovers are gone.
+      discardPendingFileCleanup(self.repositoryDirectory);
       self.manifest = manifest;
       self.state = "ready";
       self.staleReason = undefined;

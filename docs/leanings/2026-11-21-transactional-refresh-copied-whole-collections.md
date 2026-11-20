@@ -1,0 +1,29 @@
+# 2026-11-21 — Transactional daemon refreshes copied whole Qdrant collections
+
+- **Status:** Resolved
+- **Task/context:** Find out where the indexing daemon's multi-GB Qdrant disk writes come from, then reduce them (`packages/code-index` refresh paths, `packages/coding-agent` daemon drain worker).
+- **Unexpected observation or failure:** The previous Qdrant process wrote 5.0 GiB to disk and read 5.4 GiB in 6.7 hours. Optimizer activity appeared only on brand-new generations of one repository. A one-file edit in a 47k-chunk repository rewrote all 47k points, about a 370 MB collection.
+- **Evidence:** `health-check.ts` always passed `refresh({ transactional: true })`. `refresh.ts` sent every transactional refresh with at least one changed file to `performSparseGenerationRefresh`, which scrolls the old collection twice and upserts every point into a new collection. Isolated Qdrant 1.18.3 measurement (temporary storage, fake deterministic 1024-dimension embeddings, `proc_pid_rusage` on the Qdrant process, copy of `packages/coding-agent` with 1,864 files and 70,973 chunks). Daemon-style refresh after a one-line edit to one file (40 chunks), two runs each: the old code wrote 2,242 MB and 1,748 MB, read 622 MB and 820 MB, and created a new collection each time; the new code wrote 1.7 MB and 1.5 MB, read 0.9 MB and 0.05 MB, and kept the collection. The initial index build wrote 1.51–1.66 GB, so one old refresh cost more than building the index.
+- **Approaches tried:**
+  - **Attempt:** Drop `transactional` and keep the old incremental path, which per file upserted the new version and then deleted the old one.
+    - **Outcome:** Did not work
+    - **Why:** A cancelled run left files updated in Qdrant while the manifest still had the old hashes. Worse, when the file was later reverted, the plan saw it as unchanged, so the index served the cancelled version and no longer held the file's real contents. The regression test `purges a cancelled refresh's orphans after the files revert to their committed contents` reproduces this on the old code.
+  - **Attempt:** Make in-place refreshes snapshot-safe by tying search visibility to the committed manifest.
+    - **Outcome:** Worked
+    - **Why:** Point ids include the file hash, so old and new versions coexist and re-upserting is idempotent. The atomic manifest rename becomes the visibility switch.
+  - **Attempt:** Qdrant sparse `modifier: "idf"` with hashed token ids, to remove frozen-vocabulary generations entirely.
+    - **Outcome:** Partial (deferred)
+    - **Why:** It removes drift-triggered copies, but in-place updates still need the visibility rule, and it changes ranking and forces a one-time rebuild of every repository. It belongs in a separate change with a retrieval-quality check.
+- **Root cause:** #78 bought cancellation safety by building a full new generation for every daemon refresh, so write volume grew with repository size instead of change size. The incremental path it bypassed was not cancellation-safe because it deleted old versions before the manifest commit.
+- **Resolution:**
+  - Search drops candidates whose `payload.fileHash` differs from `manifest.files[payload.path].hash`.
+  - Incremental refresh records the touched paths in `pending-file-cleanup.json`, upserts the new versions without deleting anything, commits the manifest, then purges non-committed versions. A failing path does not stop the others, and failed or cancelled paths stay recorded.
+  - Every refresh first purges the paths left in the record and never fails because of it. A committed sparse generation or rebuild discards the record, because its collection holds only committed versions.
+  - The `transactional` option is removed. Generation copies remain only for the change-ratio and vocabulary-drift thresholds.
+- **Verification:** `packages/code-index/test/rag-incremental-refresh-visibility.test.ts`: six tests failed on the old code before the change, and all pass after it. The focused RAG and daemon suites, `npm run check`, the changed-line coverage gate, and a mutation pass also pass: all 11 mutants are killed. They include the ones named by two independent reviews of the tests and of swallowed errors.
+- **Prevention/follow-up:**
+  - For a mutable index, express cancellation safety as "visible = committed manifest" instead of copying the data.
+  - Follow-up: evaluate sparse IDF so drift no longer forces generation copies.
+  - Follow-up: optionally skip re-embedding versions a cancelled run already stored.
+- **Reusable learning:** When an operation must be cancellation-safe, check whether an atomic metadata commit plus a read-side filter gives the same guarantee before copying the whole dataset. Delete superseded data only after the commit, and keep a write-ahead record so later runs can reclaim it.
+- **References:** `packages/code-index/src/rag/service/pending-file-cleanup.ts`, `packages/code-index/src/rag/service/workspacecoderagservice-methods/incremental-refresh.ts`, `packages/code-index/src/rag/service/workspacecoderagservice-methods/lifecycle.ts`, `packages/coding-agent/docs/code-indexing.md`, #78.

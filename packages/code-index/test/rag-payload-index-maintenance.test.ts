@@ -201,12 +201,16 @@ describe("RAG payload-index maintenance", () => {
   it("maintains legacy indexes before a sparse-generation scan", async () => {
     const { directory, options, store } = createFixture(undefined, 5);
     const collection = await createPersistedGeneration(options);
-    const service = new WorkspaceCodeRagService(options);
+    // One of five files changed exceeds this ratio, so the refresh must build a sparse generation.
+    const service = new WorkspaceCodeRagService({
+      ...options,
+      settings: { ...options.settings, fullSparseRebuildChangeRatio: 0.1 },
+    });
     await service.initialize();
     store.operations.length = 0;
 
     writeFileSync(join(directory, "source-0.ts"), "export const value0 = 100;\n");
-    await service.refresh({ transactional: true });
+    await service.refresh();
 
     expect(store.operations[0]).toBe(`index:${collection}`);
     expect(store.operations.filter((operation) => operation === `iterate:${collection}`)).toHaveLength(2);

@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { BM25Vocabulary } from "../src/bm25.ts";
+import { fileIdFor } from "../src/rag/service/helpers.ts";
 import type { WorkspaceCodeRagService } from "../src/rag/service/workspacecoderagservice.ts";
 import {
   do_encodeAndUpsert,
@@ -32,9 +33,11 @@ describe("rag-incremental-methods", () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "p-inc-del-"));
     try {
       const manifestPath = path.join(tmpDir, "manifest.json");
+      const committedFilesAtDelete: string[][] = [];
       const service = {
         repoId: "test-repo",
         workspaceRoot: tmpDir,
+        repositoryDirectory: tmpDir,
         manifestPath,
         manifest: {
           schemaVersion: 1,
@@ -70,7 +73,11 @@ describe("rag-incremental-methods", () => {
         settings: { embeddingDimensions: 1024 },
         vectorStore: {
           collectionStatus: async () => ({ dimensions: 1024, pointCount: 3 }),
-          deleteFileVersions: vi.fn().mockResolvedValue(undefined),
+          // Records whether the committed manifest still listed the deleted file when its chunks were removed.
+          deleteFileVersions: vi.fn(async () => {
+            const committed = JSON.parse(fs.readFileSync(manifestPath, "utf-8")) as { files: Record<string, unknown> };
+            committedFilesAtDelete.push(Object.keys(committed.files));
+          }),
         },
         waitForPayloadIndexMaintenance: vi.fn().mockResolvedValue(undefined),
         loadVocabulary: () => new BM25Vocabulary(),
@@ -108,6 +115,16 @@ describe("rag-incremental-methods", () => {
       expect(res.fullRebuild).toBe(false);
       expect(service.manifest?.files["deleted.ts"]).toBeUndefined();
       expect(service.manifest?.files["unchanged.ts"]?.size).toBe(25);
+      // The deleted file's chunks are removed only after the manifest commit, and its cleanup record is cleared.
+      expect(service.vectorStore.deleteFileVersions).toHaveBeenCalledOnce();
+      expect(service.vectorStore.deleteFileVersions).toHaveBeenCalledWith(
+        "test-coll",
+        "test-repo",
+        fileIdFor("test-repo", "deleted.ts"),
+        undefined,
+      );
+      expect(committedFilesAtDelete).toEqual([["unchanged.ts"]]);
+      expect(fs.existsSync(path.join(tmpDir, "pending-file-cleanup.json"))).toBe(false);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }

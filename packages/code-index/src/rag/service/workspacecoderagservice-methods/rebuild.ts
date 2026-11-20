@@ -5,6 +5,7 @@ import type { ScannedFile } from "../../file-preparation-core.ts";
 import { CHUNKER_NAME, CHUNKER_VERSION, INDEX_MANIFEST_SCHEMA_VERSION, writeManifestAtomic } from "../../manifest.ts";
 import type { IndexManifest, IndexUpdateSummary, RefreshIndexOptions } from "../../types.ts";
 import { unlinkBestEffort } from "../helpers.ts";
+import { discardPendingFileCleanup } from "../pending-file-cleanup.ts";
 import { rebuildCompatibilityFingerprint } from "../rebuild-checkpoint.ts";
 import {
   type ActiveRebuild,
@@ -72,6 +73,8 @@ export async function do_performRebuild(
     const previousManifest = self.manifest;
     const manifest = buildManifest(self, active);
     writeManifestAtomic(self.manifestPath, manifest);
+    // The new generation holds only committed versions, so earlier in-place leftovers need no cleanup.
+    discardPendingFileCleanup(self.repositoryDirectory);
     self.manifest = manifest;
     self.state = "ready";
     self.staleReason = undefined;

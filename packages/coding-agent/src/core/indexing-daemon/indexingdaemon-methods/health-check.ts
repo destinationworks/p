@@ -102,7 +102,6 @@ export async function do_drainWorker(self: IndexingDaemon, w: DrainWorker): Prom
         }
         const summary = await runtime.service.refresh(
           {
-            transactional: true,
             onProgress: (progress) => {
               reportActivity();
               self.updateRuntimeProgress(runtime, progress);

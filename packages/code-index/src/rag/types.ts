@@ -127,7 +127,6 @@ export interface IndexingProgress {
 }
 export interface RefreshIndexOptions {
   forceSparseRebuild?: boolean;
-  transactional?: boolean; // Build an isolated generation so cancellation cannot expose a partial update.
   onProgress?: (progress: IndexingProgress) => void;
 }
 

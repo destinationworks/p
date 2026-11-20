@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "packages": ["coding-agent"],
+  "type": "Fixed",
+  "summary": "Update small indexing change sets in the existing Qdrant collection instead of copying the whole repository into a new generation, while keeping cancelled refreshes invisible to search."
+}

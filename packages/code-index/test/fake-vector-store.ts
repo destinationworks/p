@@ -17,6 +17,10 @@ export class FakeVectorStore implements RagVectorStore {
   deletedCollections: string[] = [];
   omitDensePointId: string | undefined;
   failIteration: Error | undefined;
+  failNextDeleteFileVersions = false;
+  failDeleteFileVersions = false;
+  onDeleteFileVersions: (() => void) | undefined;
+  upsertedPointIds: string[] = [];
 
   async collectionExists(collection: string): Promise<boolean> {
     return this.collections.has(collection);
@@ -53,10 +57,18 @@ export class FakeVectorStore implements RagVectorStore {
     }
     const target = this.collections.get(collection);
     if (!target) throw new Error(`Collection not found: ${collection}`);
-    for (const point of points) target.set(point.id, point);
+    for (const point of points) {
+      target.set(point.id, point);
+      this.upsertedPointIds.push(point.id);
+    }
   }
 
   async deleteFileVersions(collection: string, repoId: string, fileId: string, keepFileHash?: string): Promise<void> {
+    this.onDeleteFileVersions?.();
+    if (this.failDeleteFileVersions || this.failNextDeleteFileVersions) {
+      this.failNextDeleteFileVersions = false;
+      throw new Error("synthetic file-version delete failure");
+    }
     const target = this.collections.get(collection);
     if (!target) throw new Error(`Collection not found: ${collection}`);
     for (const [id, point] of target) {

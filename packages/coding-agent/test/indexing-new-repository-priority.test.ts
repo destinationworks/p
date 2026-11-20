@@ -44,7 +44,9 @@ function createBlockedService(workspaceRoot: string, starts: string[], aborts: s
       diagnostics: { durationMs: 0, truncated: false },
     }),
     refresh: async (options, signal) => {
-      if (options?.transactional !== true) throw new Error("daemon refresh must be transactional");
+      // Small change sets update the collection in place; only the refresh thresholds may force a generation copy.
+      if (Object.keys(options ?? {}).join() !== "onProgress")
+        throw new Error("daemon refresh must only report progress");
       starts.push(workspaceRoot);
       options?.onProgress?.({ phase: "indexing", percent: 0, processedChunks: 0, totalChunks: 1 });
       await new Promise<void>((_resolve, reject) => {

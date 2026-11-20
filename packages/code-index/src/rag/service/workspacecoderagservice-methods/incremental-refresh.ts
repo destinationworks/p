@@ -13,7 +13,7 @@ import type {
   VectorPoint,
 } from "../../types.ts";
 import { CodeRagError } from "../coderagerror.ts";
-import { fileIdFor } from "../helpers.ts";
+import { purgePendingFileVersions, recordPendingFileCleanup } from "../pending-file-cleanup.ts";
 import { ReusableGenerationError } from "../reusablegenerationerror.ts";
 import type { PreparedChunk, RefreshPlan } from "../types.ts";
 import type { WorkspaceCodeRagService } from "../workspacecoderagservice.ts";
@@ -38,6 +38,12 @@ export async function do_performIncrementalRefresh(
   let completedFiles = 0;
   const changedFiles = [...plan.added, ...plan.changed];
   const totalFiles = changedFiles.length + plan.deleted.length;
+  // Old versions stay until the manifest commit and search shows only committed versions, so a cancelled
+  // refresh never exposes a partial update. The record lets a later refresh reclaim uncommitted versions.
+  recordPendingFileCleanup(
+    self.repositoryDirectory,
+    [...changedFiles, ...plan.deleted].map((file) => file.path),
+  );
 
   await self.processPreparedFiles(changedFiles, nextManifest.generation, signal, async (initialPrepared) => {
     if (signal.aborted) throw signal.reason ?? new Error("Code RAG refresh cancelled");
@@ -51,12 +57,6 @@ export async function do_performIncrementalRefresh(
         { processedFiles: completedFiles, totalFiles },
       );
     });
-    await self.vectorStore.deleteFileVersions(
-      nextManifest.collection,
-      self.repoId,
-      fileIdFor(self.repoId, prepared.file.path),
-      prepared.chunks.length > 0 ? prepared.file.hash : undefined,
-    );
     nextManifest.files[prepared.file.path] = prepared.entry;
     chunksEmbedded += prepared.chunks.length;
     completedFiles += 1;
@@ -66,12 +66,6 @@ export async function do_performIncrementalRefresh(
     });
   });
   for (const deleted of plan.deleted) {
-    if (signal.aborted) throw signal.reason ?? new Error("Code RAG refresh cancelled");
-    await self.vectorStore.deleteFileVersions(
-      nextManifest.collection,
-      self.repoId,
-      fileIdFor(self.repoId, deleted.path),
-    );
     delete nextManifest.files[deleted.path];
     completedFiles += 1;
     self.reportProgress(onProgress, "indexing", 5 + (94.8 * completedFiles) / Math.max(totalFiles, 1), {
@@ -97,6 +91,12 @@ export async function do_performIncrementalRefresh(
   self.state = "ready";
   self.staleReason = undefined;
   self.lastError = undefined;
+  try {
+    // The refresh is committed; cleanup only reclaims hidden chunks and leaves unfinished paths recorded.
+    await purgePendingFileVersions(self.repositoryDirectory, self.vectorStore, nextManifest, self.repoId, signal);
+  } catch {
+    // Leftover versions stay hidden from search; the next refresh retries the recorded cleanup.
+  }
   self.reportProgress(onProgress, "finalizing", 100);
   return self.summaryForPlan(plan, startedAt, chunksEmbedded, false);
 }

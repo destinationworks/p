@@ -139,7 +139,12 @@ export async function do_search(
       },
       candidateLimit,
     );
-    const { hits, truncated } = self.formatHits(candidates, normalized);
+    // An in-place refresh stores new file versions before its manifest commit and deletes old ones after it,
+    // so only chunks of the committed file versions are visible.
+    const committedCandidates = candidates.filter(
+      (candidate) => manifest.files[candidate.payload.path]?.hash === candidate.payload.fileHash,
+    );
+    const { hits, truncated } = self.formatHits(committedCandidates, normalized);
     return {
       query: normalized.query,
       workspaceRoot: self.workspaceRoot,
