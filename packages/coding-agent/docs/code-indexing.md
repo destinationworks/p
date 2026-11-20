@@ -144,21 +144,23 @@ flowchart TD
     Start[Daemon start or completed 24h interval] --> Ready[Ensure local Qdrant is ready]
     Ready --> Ownership{Anonymous request rejected and saved key accepted?}
     Ownership -- No --> Skip[Skip this collection pass]
-    Ownership -- Yes --> S1[Snapshot manifests, checkpoints, and refresh locks]
+    Ownership -- Yes --> S1[Snapshot registry, manifests, checkpoints, and refresh locks]
     S1 --> Inventory[List exact managed-namespace collections]
     Inventory --> S2[Repeat protection snapshot]
     S2 --> Unsafe{Live or ambiguous refresh lock?}
     Unsafe -- Yes --> Retain[Retain every collection]
     Unsafe -- No --> Protect[Protect union of both snapshots]
-    Protect --> Eligible{Unreferenced, exact managed name, at least 24h old?}
+    Protect --> Eligible{Not referenced by a live repository, exact managed name, at least 24h old?}
     Eligible -- No --> Retain
     Eligible -- Yes --> Delete[Delete collection]
-    Skip --> Schedule[Schedule next run after 24h]
-    Retain --> Schedule
+    Skip --> Retry[Retry after 15 minutes]
+    Retain --> Schedule[Schedule next run after 24h]
     Delete --> Schedule
 ```
 
-Collection deletion is deliberately conservative. Before every startup or daily pass, p proves ownership by requiring the endpoint to reject an anonymous health request and accept its saved API key; if ownership changes while the daemon is running, that pass is skipped before inventory. Both manifest/checkpoint snapshots must be readable, a cross-process repository refresh lock blocks deletion, names must match the exact p generation grammar, and new collections receive at least a 24-hour grace period. Disabled repositories remain referenced and are retained. Startup maintenance is asynchronous after Qdrant readiness, so schema backfills or cleanup cannot consume the backend startup timeout. Remote and externally managed Qdrant endpoints never receive local orphan deletion because this installation cannot prove ownership of other clients' collections. Before a referenced manifest collection is first searched, incrementally refreshed, or scanned for a sparse-generation refresh, it receives shared, retryable required-index maintenance. Search waits are bounded by the search timeout and revalidate a replacement collection after concurrent generation changes; index creation waits for Qdrant to report the operation completed before filtered operations can use it, without delaying daemon readiness.
+Collection deletion is deliberately conservative. Before every startup or daily pass, the collector itself proves ownership by requiring the endpoint to reject an anonymous health request and accept its saved API key. These probes allow 15 seconds, because Qdrant can stall for seconds while it optimizes segments, and they run in the background, so a slow probe never delays indexing. If ownership is unproven, that pass is skipped before inventory and retried 15 minutes later instead of after the daily interval. Both manifest/checkpoint snapshots and the indexed-repository registry must be readable, a cross-process repository refresh lock blocks deletion, names must match the exact p generation grammar, and new collections receive at least a 24-hour grace period.
+
+Only live repositories keep their collections: enabled registry entries whose directory exists. For each one the collector computes the code-rag directory id the indexing service uses now (a hash of the canonical root and its `origin` remote) and protects the collections that directory's manifest and rebuild checkpoint reference. A remote change starts a new directory, so the previous directory for the same root becomes a superseded generation; it stays protected until the current directory has a committed manifest at least as recent as its own and no rebuild checkpoint of its own is pending. Collections of disabled repositories, of unregistered roots, and of enabled repositories whose directory is gone while its parent directory still exists are deleted after the grace period. Re-enabling such a repository rebuilds its index. An enabled repository whose parent directory is also missing, as on an unmounted volume, keeps every generation. Startup maintenance is asynchronous after Qdrant readiness, so schema backfills or cleanup cannot consume the backend startup timeout. Remote and externally managed Qdrant endpoints never receive local orphan deletion because this installation cannot prove ownership of other clients' collections. Before a referenced manifest collection is first searched, incrementally refreshed, or scanned for a sparse-generation refresh, it receives shared, retryable required-index maintenance. Search waits are bounded by the search timeout and revalidate a replacement collection after concurrent generation changes; index creation waits for Qdrant to report the operation completed before filtered operations can use it, without delaying daemon readiness.
 
 Full rebuilds stream prepared chunks through a private mode-`0600` disk spool while building the frozen BM25 vocabulary. This keeps source-text memory bounded by the preparation window and embedding batch rather than the total repository size. The service checks free disk space before creating the spool, preserves a disk reserve, and removes the spool after success, cancellation, or failure.
 
@@ -330,7 +332,7 @@ The current UI exposes status, progress, queue promotion, enable, disable, and f
 
 Measure allocated disk space separately from file lengths and active collection reachability. A Qdrant storage directory includes WAL, reserved storage pages, metadata, and obsolete generations; its total size is not the size of the current repository index. Filesystem allocation units and macOS AppleDouble sidecars can add substantial overhead. Qdrant requires a POSIX-compatible persistent filesystem; see its [storage requirements](https://qdrant.tech/documentation/installation/).
 
-Startup GC cannot repair a database that has not become ready. A malformed or retired-format manifest can separately block every GC pass because the collector cannot safely establish collection reachability. Do not weaken this guard, fabricate a missing collection name, or classify a generation as disposable merely because its repository path is absent.
+Startup GC cannot repair a database that has not become ready. A malformed or retired-format manifest can separately block every GC pass because the collector cannot safely establish collection reachability. Do not weaken this guard or fabricate a missing collection name. A missing repository path makes a generation disposable only through the live-repository rule above, never for a manifest the collector cannot read.
 
 For supervised recovery, first stop and identity-check all writers, resolve the actual storage location, and inventory every manifest, rebuild checkpoint, refresh lock, collection, alias, and cluster membership. A legacy manifest may be retired only after proving that its old identity is no longer registered or consumed and that the current repository identity and manifest are valid. The current identity includes both the canonical repository path and Git remote. Preserve the retired bytes and verify the unchanged GC planner against the remaining references before touching collection directories.
 

@@ -3,7 +3,13 @@ import os from "node:os";
 import path from "node:path";
 import { EmbeddingServerManager, QdrantCollectionAdmin, QdrantServerManager } from "@dst0/p-code-index";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { INDEXED_REPOS_FILE } from "../src/core/indexed-repos.ts";
 import { IndexingDaemon } from "../src/core/indexing-daemon.ts";
+
+function writeEmptyRegistry(agentDir: string): void {
+  fs.mkdirSync(path.join(agentDir, "code-rag"), { recursive: true });
+  fs.writeFileSync(path.join(agentDir, INDEXED_REPOS_FILE), JSON.stringify({ schemaVersion: 3, repos: [] }));
+}
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -118,10 +124,11 @@ describe("indexing daemon backends", () => {
   it("does not garbage-collect a pre-existing unauthenticated loopback Qdrant", async () => {
     const ensureQdrant = vi.spyOn(QdrantServerManager.prototype, "ensureStarted").mockResolvedValue(false);
     const ensureEmbedding = vi.spyOn(EmbeddingServerManager.prototype, "ensureStarted").mockResolvedValue(false);
+    const listCollections = vi.spyOn(QdrantCollectionAdmin.prototype, "listCollections").mockResolvedValue([]);
     const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "p-indexing-daemon-startup-gc-"));
+    writeEmptyRegistry(agentDir);
     const qdrantDataDirectory = path.join(agentDir, "code-rag", "qdrant");
     fs.mkdirSync(path.join(qdrantDataDirectory, "storage", "collections", "persisted"), { recursive: true });
-    const qdrantGarbageCollector = { start: vi.fn(async () => {}), stop: vi.fn(async () => {}) };
     const trayManager = { start: vi.fn(() => true), stop: vi.fn(), isRunning: vi.fn(() => false) };
     const daemon = new IndexingDaemon({
       agentDir,
@@ -129,7 +136,6 @@ describe("indexing daemon backends", () => {
       qdrantDataDirectory,
       pythonExecutable: "unused",
       embeddingModel: "unused",
-      qdrantGarbageCollector,
       trayManager,
       disposeBackends: async () => {},
     });
@@ -139,34 +145,14 @@ describe("indexing daemon backends", () => {
 
     try {
       await daemon.start();
+      await daemon.stop();
       expect(ensureQdrant).toHaveBeenCalledOnce();
       expect(ensureEmbedding).not.toHaveBeenCalled();
-      expect(qdrantGarbageCollector.start).not.toHaveBeenCalled();
+      expect(listCollections).not.toHaveBeenCalled();
     } finally {
       await daemon.stop();
       fs.rmSync(agentDir, { force: true, recursive: true });
     }
-  });
-
-  it("garbage-collects a pre-existing authenticated owned loopback Qdrant", async () => {
-    vi.spyOn(QdrantServerManager.prototype, "ensureStarted").mockResolvedValue(false);
-    const proveOwnership = vi.spyOn(QdrantServerManager.prototype, "isOwnedServerHealthy").mockResolvedValue(true);
-    const qdrantGarbageCollector = { start: vi.fn(async () => {}), stop: vi.fn(async () => {}) };
-    const agentDir = path.join(os.tmpdir(), "p-indexing-daemon-owned-qdrant");
-    const daemon = new IndexingDaemon({
-      agentDir,
-      qdrantBinary: "unused",
-      qdrantDataDirectory: path.join(agentDir, "qdrant"),
-      pythonExecutable: "unused",
-      embeddingModel: "unused",
-      useDenseEmbeddings: false,
-      qdrantGarbageCollector,
-    });
-
-    await daemon._ensureBackendsRaw();
-
-    expect(proveOwnership).toHaveBeenCalledOnce();
-    expect(qdrantGarbageCollector.start).toHaveBeenCalledOnce();
   });
 
   it("rejects repository-local collection prefixes that diverge from daemon ownership", () => {
@@ -229,7 +215,7 @@ describe("indexing daemon backends", () => {
         daemon.quiescing = true;
       });
     const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "p-indexing-daemon-quiescing-gc-"));
-    fs.mkdirSync(path.join(agentDir, "code-rag"), { recursive: true });
+    writeEmptyRegistry(agentDir);
     daemon = new IndexingDaemon({
       agentDir,
       qdrantBinary: "unused",

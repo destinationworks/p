@@ -29,6 +29,7 @@ export type { EmbeddingDevice, EmbeddingRuntimeSettings } from "./rag/embedding-
 export { getRepositoryRefreshLockState } from "./rag/manifest.ts";
 export { QdrantCollectionAdmin } from "./rag/qdrant-collection-admin.ts";
 export { type ResolvedQdrantEndpoint, resolveQdrantEndpoint } from "./rag/qdrant-endpoint.ts";
+export { computeRepositoryId } from "./rag/repository-id.ts";
 export { CodeRagError, WorkspaceCodeRagService } from "./rag/service.ts";
 export type {
   CodeRagService,

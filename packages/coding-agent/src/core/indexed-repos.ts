@@ -68,6 +68,13 @@ export function loadIndexedRepos(agentDir: string = getAgentDir()): IndexedRepoE
   }
 }
 
+/** Reads the current-schema registry; unlike `loadIndexedRepos`, a missing or unreadable file throws. */
+export function readCurrentIndexedRepos(agentDir: string): IndexedRepoEntry[] {
+  const parsed = JSON.parse(fs.readFileSync(getIndexedReposPath(agentDir), "utf-8")) as unknown;
+  if (!isIndexedReposData(parsed)) throw new Error("Indexed repository registry has an unsupported schema");
+  return parsed.repos;
+}
+
 function findEntry(
   cwd: string,
   agentDir: string,

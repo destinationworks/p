@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "packages": ["coding-agent"],
+  "type": "Fixed",
+  "summary": "Indexing GC now deletes Qdrant collections of disabled, removed and unregistered repositories and generations left behind by a Git remote change, keeps every generation of a repository on an unreachable volume, and retries 15 minutes after an ownership probe times out instead of skipping GC for a day."
+}

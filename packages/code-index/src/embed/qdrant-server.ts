@@ -20,6 +20,9 @@ const DEFAULT_QDRANT_OPTIONS: QdrantServerManagerOptions = {
   startupTimeoutMs: DEFAULT_QDRANT_STARTUP_TIMEOUT_MS,
 };
 const SERVER_STOP_TIMEOUT_MS = 5_000;
+const HEALTH_PROBE_TIMEOUT_MS = 2_000;
+/** Ownership gates background GC, not readiness, so it tolerates a server stalled by segment optimization. */
+const OWNERSHIP_PROBE_TIMEOUT_MS = 15_000;
 type QdrantHealthStatus = "auth-rejected" | "healthy" | "unhealthy";
 
 /** Starts and monitors one local Qdrant process. */
@@ -160,8 +163,10 @@ export class QdrantServerManager {
 
   async isOwnedServerHealthy(): Promise<boolean> {
     const apiKey = this.options.apiKey?.trim() || this.readSavedApiKey();
-    if (!apiKey || (await this.checkHealthStatus(undefined)) !== "auth-rejected") return false;
-    return this.checkHealthWithApiKey(apiKey);
+    if (!apiKey || (await this.checkHealthStatus(undefined, OWNERSHIP_PROBE_TIMEOUT_MS)) !== "auth-rejected") {
+      return false;
+    }
+    return (await this.checkHealthStatus(apiKey, OWNERSHIP_PROBE_TIMEOUT_MS)) === "healthy";
   }
 
   private readSavedApiKey(): string | undefined {
@@ -219,14 +224,11 @@ export class QdrantServerManager {
   }
 
   private async checkHealth(): Promise<boolean> {
-    return this.checkHealthWithApiKey(this.options.apiKey ?? this.readSavedApiKey());
+    const apiKey = this.options.apiKey ?? this.readSavedApiKey();
+    return (await this.checkHealthStatus(apiKey, HEALTH_PROBE_TIMEOUT_MS)) === "healthy";
   }
 
-  private async checkHealthWithApiKey(apiKey: string | undefined): Promise<boolean> {
-    return (await this.checkHealthStatus(apiKey)) === "healthy";
-  }
-
-  private async checkHealthStatus(apiKey: string | undefined): Promise<QdrantHealthStatus> {
+  private async checkHealthStatus(apiKey: string | undefined, timeoutMs: number): Promise<QdrantHealthStatus> {
     try {
       const headers: Record<string, string> = {};
       if (apiKey) {
@@ -234,7 +236,7 @@ export class QdrantServerManager {
       }
       const response = await fetch(`http://127.0.0.1:${this.port}/collections`, {
         headers,
-        signal: AbortSignal.timeout(2_000),
+        signal: AbortSignal.timeout(timeoutMs),
       });
       if (response.status === 401 || response.status === 403) return "auth-rejected";
       if (!response.ok) return "unhealthy";

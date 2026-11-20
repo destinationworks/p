@@ -1,0 +1,26 @@
+# 2026-11-21 — Qdrant GC protected every manifest and skipped passes on slow ownership probes
+
+- **Status:** Resolved (GC). Write amplification from transactional refreshes: Open (proposal only).
+- **Task/context:** The indexing daemon's managed Qdrant store (`qdrantDataDirectory` `~/.p/agent/qdrant-apfs-20260921`, 4.8 GB, 20 collections) served only 11 live repositories, and `service.log` repeated "Skipping Qdrant collection GC because local storage ownership is unproven".
+- **Unexpected observation or failure:** GC did run (20 passes in the current log) but every pass deleted 0 or 1 collections. Separately, 17 of 29 Qdrant starts since 2026-10-31 were followed by the "unproven" skip before any pass.
+- **Evidence:**
+  - Every live collection was referenced by some `code-rag/<id>/manifest.json`, including directories of repositories that were deleted (`the-cave-story`, `ai-workflow-branch-2`, `1`, `bitbucket-secure-squash`, `llm-orchestrator-voice-chat`) and older directories of live repositories (`p`, `llm-orchestrator`, `accountant-app`). The directory id is `sha256(canonical root + "\0" + origin remote)`, so a remote change starts a new directory and abandons the previous one with its collection.
+  - The ownership probe pair (anonymous request must get 401, saved key must get 200) passed in about 10 ms against an idle scratch Qdrant, and at steady state the live server answered within 0.84 s (90 samples). Under load it failed: on 2026-11-20 the daemon's own requests got `fetch failed` while the Qdrant process stayed up, and after the 2026-11-21 restart (6 min 17 s to readiness) the runtime's 2 s probe failed right after "Qdrant is ready" while the collector's own probe passed.
+  - A skipped pass armed the 24-hour timer, so one timed-out probe disabled GC for a day. The runtime also repeated the probe, awaited, on every backend start (118 anonymous 401s in 6.7 h), which put it on the indexing path.
+  - Read-only dry run of the fixed planner on the live store: 8 collections, 1,966 MB, would be deleted; all 11 live repositories' current directories matched the ids the daemon uses.
+- **Approaches tried:**
+  - **Attempt:** Treat any manifest as proof of liveness (the previous rule).
+    - **Outcome:** Did not work
+    - **Why:** Manifests outlive their repositories and their remote generation; nothing ever retired them.
+  - **Attempt:** Protect only the directory id recorded in `indexed-repos.json`.
+    - **Outcome:** Did not work
+    - **Why:** The registry records the id at enable time and never updates it; for `p` it points at the superseded directory.
+  - **Attempt:** Recompute the current id per enabled, existing repository (shared `computeRepositoryId`), protect its directory, and retire another directory for the same root only when the current one has a newer committed manifest.
+    - **Outcome:** Worked
+    - **Why:** It matches the id the service writes to, and fails closed when git returns a different remote (the computed directory is missing or older, so every generation stays protected).
+- **Root cause:** GC liveness was "referenced by any manifest", which can never become false for deleted, disabled or superseded repositories. Ownership skips came from a 2 s probe timeout on a Qdrant stalled by segment optimization, combined with a 24-hour retry.
+- **Resolution:** GC reads the registry strictly (missing or unreadable means no pass), protects only live repositories' current generations, keeps every generation of an enabled repository whose parent directory is missing (unmounted volume), proves ownership only inside the collector with 15 s probes, and retries an unproven pass after 15 minutes.
+- **Verification:** Regression tests in `packages/coding-agent/test/qdrant-collection-gc-repository-generations.test.ts`, `qdrant-collection-gc-live-repositories.test.ts`, `qdrant-daemon-runtime-ownership.test.ts`, `qdrant-garbage-collection-failures.test.ts` and `packages/code-index/test/qdrant-server-lifecycle.test.ts` failed before the fix; live read-only dry run as above.
+- **Prevention/follow-up:** Open: the daemon calls `refresh({ transactional: true })` for every run, and `refresh.ts` sends every transactional refresh with at least one changed file through the sparse-generation path, which copies every point into a new collection. Since the previous Qdrant start only `llm-orchestrator`'s new generations (47k points, about 370 MB each) had optimizer runs, while Qdrant wrote 5.0 GiB in 6.7 h. Making incremental refresh cancellation-safe (hide hits whose `fileHash` is not the manifest's) would let small change sets skip the copy.
+- **Reusable learning:** A GC liveness proof must be able to become false: derive it from the current owner (registry plus recomputed identity), not from artifacts that outlive their owner. Ownership probes that gate background work must be off the hot path, tolerate a stalled server, and retry soon.
+- **References:** `packages/coding-agent/src/core/indexing-daemon/qdrant-collection-protection.ts`, `packages/coding-agent/docs/code-indexing.md` (collection GC section), `packages/coding-agent/src/core/indexing-daemon/indexingdaemon-methods/health-check.ts` (transactional refresh).
