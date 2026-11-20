@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "packages": ["coding-agent"],
+  "type": "None",
+  "reason": "CI-only: let build-check-test overflow to free standard GitHub-hosted runners when the self-hosted pool is busy."
+}
