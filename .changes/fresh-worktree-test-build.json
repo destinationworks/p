@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "packages": ["coding-agent"],
+  "type": "None",
+  "reason": "Developer test tooling only: test.sh fails fast without a local build and code-index Python tests pick an interpreter with numpy."
+}

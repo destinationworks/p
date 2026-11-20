@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "packages": ["coding-agent"],
+  "type": "None",
+  "reason": "Repository check tooling only: npm run check and CI now fail when packages/site/src/docsData.json drifts from packages/coding-agent/docs."
+}

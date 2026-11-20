@@ -42,6 +42,11 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
+      - name: Check site docs data is current
+        # The build regenerates the tracked packages/site/src/docsData.json, so the check inside
+        # `npm run check` after it compares the file with itself. Compare the committed file first.
+        run: npm run check:site-docs
+
       - name: Build
         run: npm run build
 
