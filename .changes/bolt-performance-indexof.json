@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "type": "None",
+  "reason": "Internal performance optimization: Replace array spread and filter with indexOf for replacement character checking in code indexer.",
+  "packages": [
+    "coding-agent"
+  ]
+}
