@@ -2,11 +2,20 @@
  * Embedding module — re-exports the pluggable provider interface, HTTP provider, and server manager.
  */
 
+export {
+  FallbackEmbeddingProvider,
+  type FallbackEmbeddingProviderOptions,
+} from "./embed/fallback-embedding-provider.ts";
 export type { EmbeddingProviderHttpOptions } from "./embed/http.ts";
 export { createDefaultProvider, EmbeddingProviderHttp } from "./embed/http.ts";
+export {
+  OrchestratorEmbeddingProvider,
+  type OrchestratorEmbeddingProviderOptions,
+} from "./embed/orchestrator-embedding-provider.ts";
 export type { EmbeddingProvider } from "./embed/provider.ts";
 export type { QdrantServerManagerOptions } from "./embed/qdrant-server.ts";
 export { DEFAULT_QDRANT_STARTUP_TIMEOUT_MS, QdrantServerManager } from "./embed/qdrant-server.ts";
+export { RemoteEmbeddingError, type RemoteEmbeddingFailureKind } from "./embed/remote-embedding-error.ts";
 export type { EmbeddingServerManagerOptions } from "./embed/server.ts";
 export { EmbeddingServerManager } from "./embed/server.ts";
 export const EMBED_MODULE_VERSION = "1.0.0";

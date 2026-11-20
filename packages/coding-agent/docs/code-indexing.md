@@ -296,6 +296,57 @@ Embedding resource controls are safe caps rather than fixed utilization targets:
 
 Edit these fields in `~/.p/agent/code-rag.json` and rerun `./reinstall.sh`. The generated launchd or systemd service receives only the agent-directory and vendor runtime paths; indexing behavior always comes from the config file. An explicit `qdrantDataDirectory` is preserved by reinstall, so a verified local APFS destination is not silently replaced by the default path.
 
+### Remote embeddings through llm-orchestrator
+
+Dense embeddings can run on a GPU worker behind
+[llm-orchestrator](https://github.com/destinationworks/llm-orchestrator) instead
+of the local Python embedding server. The local server remains the fallback.
+These settings are accepted only from the user's `~/.p/agent/code-rag.json`. A
+repository's `.p/code-rag.json` cannot set them, so cloned code cannot send its
+own source to a remote endpoint.
+
+```json
+{
+  "remoteBackendsAllowed": true,
+  "remoteEmbeddingUrl": "https://192.168.8.167:11450",
+  "remoteEmbeddingModel": "mini-pc-2/qwen3-embedding-0.6b"
+}
+```
+
+| Field | Behavior |
+|---|---|
+| `remoteEmbeddingUrl` | Orchestrator origin. HTTPS, or plain HTTP on loopback only; no path, query or credentials. Unset keeps embeddings local. |
+| `remoteEmbeddingModel` | Canonical orchestrator model that serves `embeddingModel` |
+| `remoteEmbeddingProvider` | Provider entry in `models.json` whose `apiKey` authenticates the requests, default `mini-pc-11450`. The key is re-read for every request, so credential rotation needs no restart. |
+| `remoteEmbeddingModelsConfig` | Path of that `models.json`, default next to `code-rag.json` |
+| `remoteEmbeddingCaFile` | PEM trust anchors for the orchestrator. The default is `ca.pem` next to `code-rag.json` if it exists, otherwise Node's trust store. launchd jobs do not inherit `NODE_EXTRA_CA_CERTS` from the login shell, so the file is read explicitly. |
+| `remoteEmbeddingTimeoutMs` | Per-request deadline, default 120000 |
+| `remoteEmbeddingCooldownMs` | How long to stay local after an outage, rejection or invalid response, default 300000 |
+| `remoteEmbeddingBusyRetryMs` | Upper bound on the wait after a busy answer, default 60000. A shorter `Retry-After` is honoured. |
+
+Requests carry `x-llm-orchestrator-switch-policy: if-idle`. The orchestrator
+switches its GPU to the embedding model only when the worker is idle and its
+current model has been unused long enough. Otherwise it answers `503` with
+`Retry-After`, and p embeds that batch locally.
+
+The response must name the configured model and contain one finite,
+non-zero vector of `embeddingDimensions` per input; vectors are L2-normalised
+client-side. Any other answer is treated as an outage. Caller cancellation is
+never treated as an outage.
+
+While the remote backend is healthy, the indexing daemon does not start the
+local embedding server at all. The fallback starts it on first use. The daemon
+reads these settings when it starts, so restart the indexing service after
+changing them, for example with `./reinstall.sh`.
+
+Vector compatibility: the compatibility group is model, dimensions, pooling and
+normalisation; the device is not part of it. Existing collections stay valid
+when both backends serve the same model with the same truncation. For Qwen3-Embedding-0.6B
+served by llama.cpp (F16) with the orchestrator's Hugging Face style
+512-token truncation, 512 real chunks had cosine similarity of at least 0.9993
+to the vectors stored by the Apple MPS backend (median 0.9998), so no reindex
+is needed. A different model, dimension or pooling needs a new index.
+
 Remote Qdrant or embedding URLs are rejected unless `remoteBackendsAllowed` is explicitly enabled. Managed local Qdrant accepts plain HTTP on `127.0.0.1` (or canonicalized `localhost`), defaults a missing port to `6333`, and owns only that local process and storage. HTTPS loopback, IPv6 loopback, and remote endpoints are connected as externally managed services and are never spawned, stopped, or orphan-cleaned by p. Qdrant URLs with credentials, wildcard hosts, paths, queries, fragments, or non-HTTP(S) schemes are rejected.
 
 ## Troubleshooting

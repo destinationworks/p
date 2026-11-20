@@ -4,6 +4,13 @@ import path from "node:path";
 import { DEFAULT_QDRANT_STARTUP_TIMEOUT_MS } from "../embed/qdrant-server.ts";
 import { DEFAULT_MAX_SEQUENCE_LENGTH, defaultMaxSequenceLength } from "./embedding-settings.ts";
 import { resolveQdrantEndpoint } from "./qdrant-endpoint.ts";
+import {
+  DEFAULT_REMOTE_EMBEDDING_SETTINGS,
+  REMOTE_EMBEDDING_NUMBER_KEYS,
+  REMOTE_EMBEDDING_STRING_KEYS,
+  rejectRepositoryRemoteEmbeddingSettings,
+  resolveRemoteEmbeddingSettings,
+} from "./remote-embedding-settings.ts";
 import type { WorkspaceCodeRagServiceOptions, WorkspaceCodeRagSettings } from "./types.ts";
 
 export const DEFAULT_EMBEDDING_POOLING = "last-non-padding-token";
@@ -58,6 +65,7 @@ export const DEFAULT_WORKSPACE_CODE_RAG_SETTINGS: WorkspaceCodeRagSettings = {
   fullSparseRebuildChangeRatio: 0.05,
   sparseRebuildDriftRatio: 0.2,
   collectionPrefix: "p_code_chunks",
+  ...DEFAULT_REMOTE_EMBEDDING_SETTINGS,
 };
 
 const BOOLEAN_KEYS = new Set<keyof WorkspaceCodeRagSettings>(
@@ -66,14 +74,14 @@ const BOOLEAN_KEYS = new Set<keyof WorkspaceCodeRagSettings>(
   ) as (keyof WorkspaceCodeRagSettings)[],
 );
 const NUMBER_KEYS = new Set<keyof WorkspaceCodeRagSettings>(
-  "qdrantStartupTimeoutMs embeddingDimensions defaultLimit maxLimit maxContextCharacters maxResultCharacters searchTimeoutMs embeddingTimeoutMs embeddingStartupTimeoutMs maxEmbeddingBatchSize maxCpuThreads maxSequenceLength minSystemMemoryReserveBytes minAcceleratorMemoryReserveBytes embeddingModelParameterCount maxFileBytes defaultChunkLines maxChunkLines maxSparseVocabularyTokens preparationMaxWorkers preparationWorkerMemoryBytes preparationMemoryReserveBytes encodeBatchSize upsertBatchSize maxEncodeCharacters fullSparseRebuildChangeRatio sparseRebuildDriftRatio".split(
-    " ",
-  ) as (keyof WorkspaceCodeRagSettings)[],
+  "qdrantStartupTimeoutMs embeddingDimensions defaultLimit maxLimit maxContextCharacters maxResultCharacters searchTimeoutMs embeddingTimeoutMs embeddingStartupTimeoutMs maxEmbeddingBatchSize maxCpuThreads maxSequenceLength minSystemMemoryReserveBytes minAcceleratorMemoryReserveBytes embeddingModelParameterCount maxFileBytes defaultChunkLines maxChunkLines maxSparseVocabularyTokens preparationMaxWorkers preparationWorkerMemoryBytes preparationMemoryReserveBytes encodeBatchSize upsertBatchSize maxEncodeCharacters fullSparseRebuildChangeRatio sparseRebuildDriftRatio"
+    .split(" ")
+    .concat(REMOTE_EMBEDDING_NUMBER_KEYS) as (keyof WorkspaceCodeRagSettings)[],
 );
 const STRING_KEYS = new Set<keyof WorkspaceCodeRagSettings>(
-  "searchMode qdrantUrl qdrantApiKey qdrantBinary qdrantDataDirectory embeddingServerUrl embeddingModel embeddingPooling embeddingNormalization embeddingDevice pythonExecutable torchBackend mpsPrecision openvinoCacheDirectory vitisaiCacheDirectory vitisaiCacheKey vitisaiConfigFile vitisaiLogLevel amdIronArtifactDirectory amdIronCacheDirectory amdIronSourceDirectory amdNpuGeneration amdNpuRuntimeVersion ryzenAiArchivePath collectionPrefix".split(
-    " ",
-  ) as (keyof WorkspaceCodeRagSettings)[],
+  "searchMode qdrantUrl qdrantApiKey qdrantBinary qdrantDataDirectory embeddingServerUrl embeddingModel embeddingPooling embeddingNormalization embeddingDevice pythonExecutable torchBackend mpsPrecision openvinoCacheDirectory vitisaiCacheDirectory vitisaiCacheKey vitisaiConfigFile vitisaiLogLevel amdIronArtifactDirectory amdIronCacheDirectory amdIronSourceDirectory amdNpuGeneration amdNpuRuntimeVersion ryzenAiArchivePath collectionPrefix"
+    .split(" ")
+    .concat(REMOTE_EMBEDDING_STRING_KEYS) as (keyof WorkspaceCodeRagSettings)[],
 );
 const EMBEDDING_DEVICES = new Set<WorkspaceCodeRagSettings["embeddingDevice"]>(
   "auto cpu cuda rocm mps npu apple-ane apple-mps amd-rocm nvidia-cuda ryzenai vitisai amd-phoenix-npu amd-ryzenai-npu openvino openvino-npu intel-openvino-cpu intel-openvino-npu".split(
@@ -249,12 +257,22 @@ function resolveQdrantApiKey(apiKey?: string, qdrantDataDirectory?: string): str
 export function loadWorkspaceCodeRagSettings(options: WorkspaceCodeRagServiceOptions): WorkspaceCodeRagSettings {
   const userConfigPath = options.userConfigPath ?? path.join(options.dataDirectory, "..", "code-rag.json");
   const repositoryConfigPath = options.repositoryConfigPath ?? path.join(options.workspaceRoot, ".p", "code-rag.json");
-  const settings = validateSettings({
-    ...DEFAULT_WORKSPACE_CODE_RAG_SETTINGS,
-    ...parseConfigFile(userConfigPath),
-    ...parseConfigFile(repositoryConfigPath),
-    ...(options.settings ?? {}),
-  });
+  const userConfig = parseConfigFile(userConfigPath);
+  const repositoryConfig = parseConfigFile(repositoryConfigPath);
+  rejectRepositoryRemoteEmbeddingSettings(repositoryConfig, repositoryConfigPath);
+  const settings = resolveRemoteEmbeddingSettings(
+    validateSettings({
+      ...DEFAULT_WORKSPACE_CODE_RAG_SETTINGS,
+      ...userConfig,
+      ...repositoryConfig,
+      ...(options.settings ?? {}),
+    }),
+    {
+      // Only the user (or the embedding caller) may opt repository text into a remote embedder.
+      remoteBackendsAllowed: options.settings?.remoteBackendsAllowed ?? userConfig.remoteBackendsAllowed ?? false,
+      userConfigPath,
+    },
+  );
   settings.qdrantApiKey = resolveQdrantApiKey(settings.qdrantApiKey, settings.qdrantDataDirectory);
   return settings;
 }

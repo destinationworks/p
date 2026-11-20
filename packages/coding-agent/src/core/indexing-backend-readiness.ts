@@ -2,6 +2,7 @@ import { matchesConfiguredEmbeddingBackend } from "@dst0/p-code-index";
 import { getAgentDir } from "../config.ts";
 import { requestIndexingBackendForRepo } from "./indexed-repos.ts";
 import { readIndexingSelectionConfiguration } from "./indexing-config-reader.ts";
+import { userConfigPrefersRemoteEmbedding } from "./indexing-daemon/remote-embedding-preference.ts";
 
 const DEFAULT_STARTUP_TIMEOUT_MS = 5 * 60_000;
 const DEFAULT_POLL_MS = 250;
@@ -11,6 +12,11 @@ export interface IndexingBackendReadinessOptions {
   fetchImplementation?: typeof fetch;
   pollMs?: number;
   timeoutMs?: number;
+  /**
+   * Wait even when a remote embedder is preferred, because it is falling back
+   * to the local embedding server.
+   */
+  localFallback?: boolean;
 }
 
 export async function waitForIndexingEmbeddingBackend(
@@ -21,6 +27,8 @@ export async function waitForIndexingEmbeddingBackend(
   const agentDir = options.agentDir ?? getAgentDir();
   const configuration = readIndexingSelectionConfiguration(agentDir);
   if (configuration.searchMode === "bm25-only") return;
+  // A remote-first embedder needs no local server unless it falls back to it.
+  if (!options.localFallback && userConfigPrefersRemoteEmbedding(agentDir)) return;
   const fetchImplementation = options.fetchImplementation ?? fetch;
   if (await probeEmbeddingBackend(configuration.device, fetchImplementation, signal)) return;
   if (!requestIndexingBackendForRepo(cwd, agentDir)) {

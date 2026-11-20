@@ -1,0 +1,32 @@
+# 2026-11-21 — Moving code-index embeddings to a remote GPU keeps the index only with measured parity and explicit TLS trust
+
+- **Status:** Partial
+- **Task/context:** Offloading p's code-index embeddings (Qwen3-Embedding-0.6B, 1024 dimensions, last-token pooling, L2) from the MacBook's MPS backend to an llm-orchestrator GPU worker on Mini PC 2, without reindexing about 250k chunks.
+- **Unexpected observation or failure:**
+  - Throughput: the MacBook's MPS backend embedded 0.11 to 0.28 chunks/s under load average 140 to 220. Batch size was 1 and every input was padded to 512 tokens.
+  - TLS: the daemon runs as a launchd job, so it cannot rely on `NODE_EXTRA_CA_CERTS` (set in `.zshrc`) to trust the orchestrator's private CA.
+- **Evidence:**
+  - Measurement: 512 random real chunks from the p collection, each with its stored MPS vector. The Mini PC 2 RX 9070 XT did 61 to 137 chunks/s, Mac to Mini PC 2 over the LAN 106 to 121 chunks/s.
+  - Parity: cosine to the stored vectors was min 0.99977 on the RX 9070 XT and min 0.99929 on the RX 6800, but only with Hugging Face style truncation (511 content tokens plus EOS).
+  - TLS: `openssl s_client` and Node `https` with `~/.p/agent/ca.pem` both verify the orchestrator (its SAN includes 192.168.8.167).
+- **Approaches tried:**
+  - **Attempt:** Reuse `embeddingServerUrl` with `remoteBackendsAllowed`.
+    - **Outcome:** Did not work
+    - **Why:** It speaks the local server's private `/embed` protocol and turns off the local server, so there is no fallback.
+  - **Attempt:** Global `fetch` for the orchestrator call.
+    - **Outcome:** Did not work
+    - **Why:** A private CA per request needs an undici dispatcher, which is not a direct dependency. `node:https` with `ca` works without one.
+  - **Attempt:** An OpenAI `/v1/embeddings` provider behind a fallback wrapper. The orchestrator truncates on the worker, the local server starts only on fallback, and remote settings are accepted only from the user config.
+    - **Outcome:** Worked in tests
+    - **Why:** Cancellation propagates, outages and busy answers fall back with a cooldown, and the vector contract is checked on every response.
+- **Root cause:** Three separate gaps: no remote embedding protocol with a fallback, MPS throughput on a loaded Mac, and launchd lacking the shell's CA environment.
+- **Resolution:**
+  - `OrchestratorEmbeddingProvider` (base64 vectors, contract checks, L2 normalisation) inside `FallbackEmbeddingProvider`.
+  - New settings `remoteEmbedding*`; the CA is read from `remoteEmbeddingCaFile` or `ca.pem`.
+  - The daemon skips the eager local server start while remote embeddings are preferred.
+- **Verification:**
+  - Focused Vitest suites: orchestrator provider contract and failures, fallback, settings, credential reader, daemon wiring. `npm run check` passes.
+  - Not yet verified: a live indexing run through Mini PC 2. It waits for the orchestrator deployment and for the GGUF on Mini PC 2's model volume, both owner-approved steps.
+- **Prevention/follow-up:** After deployment, run one repository refresh through the orchestrator and compare a sample of new vectors with stored ones before enabling the remote backend for every repository.
+- **Reusable learning:** An embedding backend may change without a reindex only after measuring cosine parity against the stored vectors with identical truncation. A background daemon must load private trust anchors from a file, never from shell environment.
+- **References:** `packages/code-index/src/embed/orchestrator-embedding-provider.ts`, `packages/code-index/src/embed/fallback-embedding-provider.ts`, `packages/coding-agent/docs/code-indexing.md` (Remote embeddings through llm-orchestrator).

@@ -5,9 +5,7 @@ import {
   DEFAULT_WORKSPACE_CODE_RAG_SETTINGS,
   EmbeddingServerManager,
   type IndexingProgress,
-  normalizeQdrantCollectionPrefix,
   type RagStatus,
-  WorkspaceCodeRagService,
 } from "@dst0/p-code-index";
 import { sendSystemNotification } from "../../utils/system-notifier.ts";
 import { recordIndexingResourceFailureForRepo } from "../indexed-repos.ts";
@@ -16,6 +14,7 @@ import type { IndexingTrayService } from "../indexing-tray-manager.ts";
 import { NO_INDEXING_TRAY } from "../indexing-tray-none.ts";
 import { computeIndexingVersion } from "../indexing-version.ts";
 import { DEFAULT_REPOSITORY_TIMEOUT_MS } from "./constants.ts";
+import { createDaemonServiceFactory } from "./daemon-service-factory.ts";
 import { do_drainWorker, do_requestRefresh, do_startDrain } from "./indexingdaemon-methods/health-check.ts";
 import {
   do_ensureBackends,
@@ -50,6 +49,7 @@ import {
   do_watchRepository,
 } from "./indexingdaemon-methods/status-monitoring.ts";
 import { createQdrantDaemonRuntime } from "./qdrant-daemon-runtime.ts";
+import { userConfigPrefersRemoteEmbedding } from "./remote-embedding-preference.ts";
 import type {
   DaemonLock,
   DrainWorker,
@@ -127,27 +127,18 @@ export class IndexingDaemon {
     });
     this.serviceFactory =
       options.serviceFactory ??
-      ((workspaceRoot) => {
-        const service = new WorkspaceCodeRagService({
-          workspaceRoot,
-          dataDirectory: path.join(options.agentDir, "code-rag"),
-          userConfigPath: path.join(options.agentDir, "code-rag.json"),
-          manageLocalBackends: false,
-          allowSearchRefresh: false,
-        });
-        if (service.settings.qdrantUrl !== qdrantRuntime.endpointUrl) {
-          throw new Error("Repository qdrantUrl must match the daemon Qdrant endpoint");
-        }
-        if (normalizeQdrantCollectionPrefix(service.settings.collectionPrefix) !== qdrantRuntime.collectionPrefix) {
-          throw new Error("Repository collectionPrefix must match daemon ownership");
-        }
-        return service;
+      createDaemonServiceFactory({
+        agentDir: options.agentDir,
+        qdrantEndpointUrl: qdrantRuntime.endpointUrl,
+        collectionPrefix: qdrantRuntime.collectionPrefix,
+        prepareEmbeddingFallback: (signal) => this.embeddingManager.ensureStarted(signal),
       });
+    const remoteEmbeddingFirst = userConfigPrefersRemoteEmbedding(options.agentDir);
     this._ensureBackendsRaw =
       options.ensureBackends ??
       (async (signal) => {
         await this.startQdrantMaintenance(signal);
-        if (this.options.useDenseEmbeddings) await this.embeddingManager.ensureStarted(signal);
+        if (this.options.useDenseEmbeddings && !remoteEmbeddingFirst) await this.embeddingManager.ensureStarted(signal);
       });
     const disposeBackendProcesses =
       options.disposeBackends ?? (async () => Promise.all([this.embeddingManager.stop(), qdrantRuntime.stopProcess()]));
